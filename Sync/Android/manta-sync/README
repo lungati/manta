@@ -1,0 +1,24 @@
+Welcome to Manta Sync for Android!
+
+Manta is a simple synchronization system that is designed to make local databses easily accessible anywhere. Manta Sync for Android is a utility application for Android that provides a simple ContentProvider on your device which is syncronized automatically with a remote database. Manta handles incremental sync, regularly updating the local database, and integration with the Android OS.
+
+Currently, Manta syncs only in one direction (from the remote server to the local device), but bi-directional sync, allowing updates to remote data, is planned.
+
+To learn more, please check out the introduction wiki page, which contains background on the application, as well as screen shots of the app in action:
+
+    https://github.com/kevgibbs/manta/wiki
+
+
+Copyright (C) 2011 Kevin Gibbs and The Manta Project
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+     http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.

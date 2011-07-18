@@ -1,0 +1,22 @@
+Welcome to Manta Store!
+
+Manta is a simple synchronization system that is designed to make local databses easily accessible anywhere. Manta Store is an App Engine application, written in Python, which provides a simple JSON-based REST store. The store is designed to support synchronization, with a merge and conflict protocol, and incremental updates for clients. The store also saves every revision made to any piece of data, so complete diffs, audit trails, and reversions are possible. The Store works with the Manta Sync application for Android, and the Upload application for SQL, to bridge your local database with an Android phone.
+
+To learn more, please check out the introduction wiki page, which contains background on the application, as well as screen shots of the app in action:
+
+    https://github.com/kevgibbs/manta/wiki
+
+
+Copyright (C) 2011 Kevin Gibbs and The Manta Project
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+     http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
