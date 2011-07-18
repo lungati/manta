@@ -1,0 +1,8 @@
+mapreduce:
+- name: touch-all
+  mapper:
+    input_reader: google.appengine.ext.mapreduce.input_readers.DatastoreKeyInputReader
+    handler: bulk.touch
+    params:
+    - name: entity_kind
+      default: Transaction

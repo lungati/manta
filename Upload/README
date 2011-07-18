@@ -1,6 +1,6 @@
 Welcome to Manta Upload!
 
-Manta is a simple synchronization system that is designed to make local databses easily accessible anywhere. Manta Upload is a set of Python scripts which handle pulling data from your local database, finding any differences since the last run, and uploading the data to an Internet-based server running Manta Store. Upload is designed to be run regularly (i.e. hourly, or daily) on a local machine which has access to your SQL database. It uses a config file system to learn the tables you want to export, and an associated SQL select statement for each table which will export a current CSV dump of the view you'd like made available. Upload then handles finding incremental syncs between your hourly runs, and sending only the changed data up to the remote server. The scripts are fault tolerant, and are designed to run properly and without intervention in the case of a power outage or a loss of internet connectivity during upload.
+Manta is a simple synchronization system that is designed to make local databases easily accessible anywhere. Manta Upload is a set of Python scripts which handle pulling data from your local database, finding any differences since the last run, and uploading the data to an Internet-based server running Manta Store. Upload is designed to be run regularly (i.e. hourly, or daily) on a local machine which has access to your SQL database. It uses a config file system to learn the tables you want to export, and an associated SQL select statement for each table which will export a current CSV dump of the view you'd like made available. Upload then handles finding incremental syncs between your hourly runs, and sending only the changed data up to the remote server. The scripts are fault tolerant, and are designed to run properly and without intervention in the case of a power outage or a loss of internet connectivity during upload.
 
 Using Upload is usually as simple as writing the config file, testing the config using the 'sql' command functionality, and then using cron on your local system to run the command:
 
@@ -10,7 +10,7 @@ with whatever schedule you desire.
 
 Upload has been tested on both Linux and Windows.
 
-To learn more, please check out the introduction wiki page, which contains background on the application, as well as screen shots of the app in action:
+To learn more, please check out the introduction wiki page:
 
     https://github.com/kevgibbs/manta/wiki
 

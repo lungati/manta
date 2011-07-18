@@ -1,0 +1,33 @@
+Welcome to Manta!
+
+Manta is a simple synchronization system that is designed to make local databses easily accessible anywhere.
+
+Manta is composed of three separate projects that work together:
+  * Upload, which sends data from a local SQL database up to an accessible server,
+  * Store, a JSON-based REST store that suports incremental synchronization, and
+  * Sync, an agent which syncronizes the remote data to a local system for offline access.
+
+Multiple Sync implemenations can be provided, depending on the source platform. In particular, though, the project provides:
+
+  * Manta Sync for Android, an Android ContentProvider that transparently provides native access to your remote data.
+
+Manta is designed to be easily reusable for a variety of situations where you need local SQL data made available on remote devices or browsers, without requiring you to re-invent the wheel each time. Manta currently powers Simple MFI, an application for microfinance loan officers, which gives them access to all their client data (usually held in an on-premise MIS database) on a low-cost Android phone.
+
+More information about each Manta component can be found in the README in each directory, and on the main project page, at:
+
+    https://github.com/kevgibbs/manta/wiki
+
+
+Copyright (C) 2011 Kevin Gibbs and The Manta Project
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+     http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.

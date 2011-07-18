@@ -1,0 +1,5 @@
+.DS_Store
+*~
+*.pyc
+scratch/
+appengine_config.py

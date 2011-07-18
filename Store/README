@@ -1,8 +1,8 @@
 Welcome to Manta Store!
 
-Manta is a simple synchronization system that is designed to make local databses easily accessible anywhere. Manta Store is an App Engine application, written in Python, which provides a simple JSON-based REST store. The store is designed to support synchronization, with a merge and conflict protocol, and incremental updates for clients. The store also saves every revision made to any piece of data, so complete diffs, audit trails, and reversions are possible. The Store works with the Manta Sync application for Android, and the Upload application for SQL, to bridge your local database with an Android phone.
+Manta is a simple synchronization system that is designed to make local databases easily accessible anywhere. Manta Store is an App Engine application, written in Python, which provides a simple JSON-based REST store. The store is designed to support synchronization, with a merge and conflict protocol, and incremental updates for clients. The store also saves every revision made to any piece of data, so complete diffs, audit trails, and reversions are possible. The Store works with the Manta Sync application for Android, and the Upload application for SQL, to bridge your local database with an Android phone.
 
-To learn more, please check out the introduction wiki page, which contains background on the application, as well as screen shots of the app in action:
+To learn more, please check out the introduction wiki page:
 
     https://github.com/kevgibbs/manta/wiki
 

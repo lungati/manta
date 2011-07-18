@@ -1,0 +1,16 @@
+<project name="AndroidLib" default="dist" basedir=".">
+   <description>Android Sample Library</description>
+   <!-- Setting global properties for this build -->
+   <property name="src" location="src" />
+   <property name="bin" location="bin" />
+ 
+   <target name="dist">
+      <jar destfile="mantasync-1.0.jar" basedir="bin/">
+         <!-- Use ** to include the directory recursively -->
+        <include name="org/mantasync/Util.class" />
+        <include name="org/mantasync/Util$*.class" />
+        <include name="org/mantasync/Store.class" />
+        <include name="org/mantasync/Store$*.class" />
+      </jar>
+   </target>
+</project>
