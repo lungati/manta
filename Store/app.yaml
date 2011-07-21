@@ -13,6 +13,7 @@ skip_files: |
  (.*~)|
  (.*\.py[co])|
  (.*\-journal)|
+ (scratch/.*)
  )$
 
 

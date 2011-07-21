@@ -28,30 +28,51 @@ class SqlCommand():
         self.post_command = None
         if 'post_command' in config['sql']:
             self.post_command = config['sql']['post_command']
+        self.match_lines = None
+        if 'match_lines' in config['sql']:
+            self.match_lines = config['sql']['match_lines']
         
     def Execute(self, output_path):
         statement_file = os.path.join(output_path, self.name + ".sql")
-        output_file = os.path.join(output_path, self.name + ".csv")
-        if self.post_command:
-            final_file = output_file
-            output_file += ".tmp"
+        return_file = os.path.join(output_path, self.name + ".csv")
+        sql_output_file = return_file + ".sqltmp"
+        post_output_file = return_file + ".posttmp"
+        match_output_file = return_file + ".matchtmp"
+        temp_files = [sql_output_file, post_output_file, match_output_file]
         stmt = self.command_template % (self.command)
         f = file(statement_file, 'w')
         f.write(stmt)
         f.close()
         assert path_exists(statement_file)
-        cmd = self.exec_template % (statement_file, output_file)
+        cmd = self.exec_template % (statement_file, sql_output_file)
         logging.info("Executing %s: %s" % (self.name, cmd))
         result = subprocess.call(cmd, shell=True)
         assert result == 0, "Command error, result was: %d" % (result)
         if self.post_command:
-            cmd = self.post_command % (output_file, final_file)
+            cmd = self.post_command % (sql_output_file, post_output_file)
             result = subprocess.call(cmd, shell=True)
             logging.info("Executed post command %s: %s" % (self.name, cmd))
             assert result == 0, "Post command error, result was: %d" % (result)
-            os.remove(output_file)
-            return final_file
-        return output_file
+        else:
+            shutil.copyfile(sql_output_file, post_output_file)
+        if self.match_lines:
+            f = open(post_output_file, 'r')
+            output = open(match_output_file, 'w')
+            header = f.readline().strip()
+            print >> output, header
+            for line in f:
+                if self.match_lines in line:
+                    output.write(line)
+            f.close()
+            output.close()
+            logging.info("Executed match lines %s: %s" % (self.name, self.match_lines))
+            assert path_exists(match_output_file), "Match command error"
+        else:
+            shutil.copyfile(post_output_file, match_output_file)
+        shutil.copyfile(match_output_file, return_file)
+        for f in temp_files:
+            os.remove(f)
+        return return_file
 
 def path_exists(path):
     try:

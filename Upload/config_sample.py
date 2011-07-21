@@ -42,6 +42,14 @@ config = {
         # arguments are the original file and a new destination file
         # containing the cleaned file.
         'post_command'     : 'findstr /v "^\-\-*,\-\-*" %s > %s',
+        # The match_lines stanza, which is optional, will be applied
+        # as a filter to the data lines in the output CSV file,
+        # returning only lines containing the specified string. This
+        # is provided as a convenience for when you want to filter
+        # data (such as for local testing), since stripping and
+        # re-adding the header can be difficult in the post_command.
+        # You should generally not use this setting in production.
+        'match_lines'      : 'CD0010',
 
         # The tables you want to keep synchronized with this
         # utility. You should create one command stanza for each

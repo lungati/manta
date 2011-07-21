@@ -31,7 +31,7 @@ def facet_property_name(p):
 class Revision(db.Model):
   type = db.StringProperty(required=True)
   parent_id = db.StringProperty(required=True)
-  data = db.StringProperty(required=True, indexed=False)
+  data = db.TextProperty(required=True, indexed=False)
   date = db.DateTimeProperty(required=True)
   rev = db.StringProperty(required=True)
 
