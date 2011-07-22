@@ -128,9 +128,10 @@ public class Util {
     		pathQuery = pathQuery.length() > 0 ? pathQuery.substring(1) : pathQuery;
         	Uri dataUri = Uri.parse(Store.Base.CONTENT_URI_BASE + pathQuery)
         		.buildUpon().query("").build();
-        	Cursor d = resolver.query(dataUri, null, null, null, null);
-        	int count = d.getCount();
-        	if (count == 0) {
+        	Cursor d = resolver.query(dataUri, new String[] { Store.Base._ID }, 
+        			null, null, Store.Base._ID + " limit 1" );
+        	boolean empty = !d.moveToFirst();
+        	if (empty) {
         		tablesWithoutData.add(dataUri.getPath());
         	} else {
         		tablesWithData.add(dataUri.getPath());
