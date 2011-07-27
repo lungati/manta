@@ -92,7 +92,7 @@ public final class Store {
          * <P>Type: INTEGER</P>
          */
         public static final String DATE = "date";
-        
+
         /**
          * The dirty bit for the row, set locally only.
          * <P>Type: BOOL</P>
@@ -100,11 +100,17 @@ public final class Store {
         public static final String DIRTY = "__dirty__";
         
         /**
+         * The changes made to this row, set locally only. Stored as a JSON string.
+         * <P>Type: TEXT</P>
+         */
+        public static final String CHANGES = "__changes__";
+        
+        /**
          * Built-in columns, not user data.
          * <P>Type: String[]</P>
          */
         public static final String[] BUILT_IN_COLUMNS = new String[] { 
-        	TYPE, KEY, REV, DATE, DIRTY,
+        	TYPE, KEY, REV, DATE, DIRTY, CHANGES
         	};
         public static final List<String> BUILT_IN_COLUMNS_LIST = Arrays.asList(BUILT_IN_COLUMNS);
 
@@ -116,16 +122,16 @@ public final class Store {
         
         static {
         	sProjection = new HashMap<String,String>();
-        	sProjection.put("_ID", "ROWID");
+        	sProjection.put(Base._ID, "ROWID");
         }
     }
     
     /**
-     * Base table definition
+     * Meta Synced Tables table definition
      */
-    public static final class Meta implements BaseColumns {
+    public static final class Meta_Table implements BaseColumns {
         // This class cannot be instantiated
-        private Meta() {}
+        private Meta_Table() {}
         
 	    /**
 	     * The MIME type of {@link #CONTENT_URI} providing a directory of items.
@@ -151,12 +157,6 @@ public final class Store {
 	     * The default sort order for this table
 	     */
 	    public static final String DEFAULT_SORT_ORDER = "rowid DESC";
-
-        /**
-         * The key for the row.
-         * <P>Type: INTEGER</P>
-         */
-        public static final String ID = "_id";  
         
         /**
          * The unique key for the row, the path+query component of the URI.
@@ -192,7 +192,7 @@ public final class Store {
          * Columns contained in SQL directly, as opposed to in-memory.
          * <P>Type: String[]</P>
          */
-        public static final String[] SQL_COLUMNS = new String[] { ID, PATH_QUERY, LAST_SYNCED };
+        public static final String[] SQL_COLUMNS = new String[] { _ID, PATH_QUERY, LAST_SYNCED };
 
         /**
          * Columns contained in SQL directly, as opposed to in-memory.
@@ -205,9 +205,65 @@ public final class Store {
          * <P>Type: String[]</P>
          */
         public static final String[] ALL_COLUMNS = new String[] { 
-        	ID, PATH_QUERY, LAST_SYNCED, SYNC_ACTIVE, PROGRESS_PERCENT, STATUS 
+        	_ID, PATH_QUERY, LAST_SYNCED, SYNC_ACTIVE, PROGRESS_PERCENT, STATUS 
         	};
+    }
+    
+    /**
+     * Meta Synced Tables table definition
+     */
+    public static final class Meta_Mapping implements BaseColumns {
+        // This class cannot be instantiated
+        private Meta_Mapping() {}
         
+	    /**
+	     * The MIME type of {@link #CONTENT_URI} providing a directory of items.
+	     */
+	    public static final String TABLE_NAME = "ServerMapping";
         
+	    /**
+	     * The content:// style URL for this table
+	     */
+	    public static final Uri CONTENT_URI = Uri.parse("content://" + AUTHORITY + "/" + TABLE_NAME);
+	
+	    /**
+	     * The MIME type of {@link #CONTENT_URI} providing a directory of items.
+	     */
+	    public static final String CONTENT_TYPE = "vnd.android.cursor.dir/vnd.mantastore_meta." + TABLE_NAME;
+	
+	    /**
+	     * The MIME type of a {@link #CONTENT_URI} sub-directory of a single item.
+	     */
+	    public static final String CONTENT_ITEM_TYPE = "vnd.android.cursor.item/vnd.mantastore_meta." + TABLE_NAME;
+	
+	    /**
+	     * The default sort order for this table
+	     */
+	    public static final String DEFAULT_SORT_ORDER = "rowid ASC";
+        
+        /**
+         * The unique key for the row, the app symbolic name used in URIs and SyncedTable.
+         * <P>Type: TEXT</P>
+         */
+        public static final String APP = "app";   
+        
+        /**
+         * The app identifier this app should be mapped to when talking to a remote server. May be null.
+         * <P>Type: TEXT</P>
+         */
+        public static final String MAPPED_APP = "mapped_app";   
+
+        /**
+         * The server URL to use for this app, as an override over the default server. May be null.
+         * <P>Type: TEXT</P>
+         */
+        public static final String MAPPED_URL = "sync_active";  
+
+        /**
+         * Columns contained in SQL.
+         * <P>Type: String[]</P>
+         */
+        public static final String[] ALL_COLUMNS = new String[] { _ID, APP, MAPPED_APP, MAPPED_URL };
+
     }
 }

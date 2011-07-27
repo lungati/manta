@@ -28,15 +28,19 @@ import java.util.Map;
 import java.util.Map.Entry;
 import java.util.Set;
 
+import org.codehaus.jackson.JsonGenerationException;
 import org.codehaus.jackson.JsonParseException;
 import org.codehaus.jackson.JsonParser;
 import org.codehaus.jackson.JsonProcessingException;
 import org.codehaus.jackson.JsonToken;
+import org.codehaus.jackson.map.JsonMappingException;
+import org.codehaus.jackson.map.ObjectMapper;
 import org.codehaus.jackson.util.TokenBuffer;
 import org.json.JSONObject;
 import org.mantasync.Store;
 import org.mantasync.Store.Base;
-import org.mantasync.Store.Meta;
+import org.mantasync.Store.Meta_Mapping;
+import org.mantasync.Store.Meta_Table;
 
 import android.content.ContentProvider;
 import android.content.ContentValues;
@@ -58,17 +62,20 @@ public class StoreProvider extends ContentProvider {
 
     private static final String TAG = "Manta.StoreProvider";
 
-    private static final String DATABASE_NAME = "mantastore.db";
+    private static final String DATABASE_NAME_PREFIX = "mantastore_app_";
+    private static final String DATABASE_NAME_SUFFIX = ".db";
     private static final String META_DATABASE_NAME = "mantastore_meta.db";
-    private static final int DATABASE_VERSION = 1;
+    private static final int DATABASE_VERSION = 5;
 
     private static final UriMatcher sUriMatcher;
     
     // URI types
     private static final int ITEM_LIST = 1;
     private static final int ITEM_KEY = 2;
-    private static final int ITEM_META = 3;
-    private static final int ITEM_TABLES = 4;
+    private static final int ITEM_TABLE = 3;
+    private static final int ITEM_TABLE_LIST = 4;
+    private static final int ITEM_MAPPING = 5;
+    private static final int ITEM_MAPPING_LIST = 6;
     
     public enum Mode {
         /**
@@ -98,10 +105,16 @@ public class StoreProvider extends ContentProvider {
         
         @Override
         public void onCreate(SQLiteDatabase db) {
-        	db.execSQL("CREATE TABLE '" + Meta.TABLE_NAME + "' ("
-        			+ Meta.ID + " INTEGER PRIMARY KEY, "
-                    + Meta.PATH_QUERY + " TEXT UNIQUE, "
-                    + Meta.LAST_SYNCED + " INTEGER DEFAULT 0 "
+        	db.execSQL("CREATE TABLE '" + Meta_Table.TABLE_NAME + "' ("
+        			+ Meta_Table._ID + " INTEGER PRIMARY KEY, "
+                    + Meta_Table.PATH_QUERY + " TEXT UNIQUE, "
+                    + Meta_Table.LAST_SYNCED + " INTEGER DEFAULT 0 "
+                    + ");");
+        	db.execSQL("CREATE TABLE '" + Meta_Mapping.TABLE_NAME + "' ("
+        			+ Meta_Mapping._ID + " INTEGER PRIMARY KEY, "
+                    + Meta_Mapping.APP + " TEXT UNIQUE, "
+                    + Meta_Mapping.MAPPED_APP + " TEXT "
+                    + Meta_Mapping.MAPPED_URL + " TEXT "
                     + ");");
         }
         
@@ -109,8 +122,8 @@ public class StoreProvider extends ContentProvider {
         public void onUpgrade(SQLiteDatabase db, int oldVersion, int newVersion) {
             Log.w(TAG, "Upgrading database from version " + oldVersion + " to "
                     + newVersion + ", which will destroy all old data");
-            // TODO Find listing of all tables, drop them
-            db.execSQL("DROP TABLE IF EXISTS " + Meta.TABLE_NAME);
+            db.execSQL("DROP TABLE IF EXISTS \"" + Meta_Table.TABLE_NAME + "\"");
+            db.execSQL("DROP TABLE IF EXISTS \"" + Meta_Mapping.TABLE_NAME + "\"");
             onCreate(db);
         }
     }
@@ -126,8 +139,12 @@ public class StoreProvider extends ContentProvider {
 
 		final SimpleDateFormat mDateFormat;
 		
-        DatabaseHelper(Context context, StoreProvider provider) {
-            super(context, DATABASE_NAME, null, DATABASE_VERSION);
+		static boolean isValidAppString(String app) {
+			return !(app.contains("/") || app.contains("..") || app.contains(" "));
+		}
+		
+        DatabaseHelper(Context context, StoreProvider provider, String app) {
+            super(context, DATABASE_NAME_PREFIX + app + DATABASE_NAME_SUFFIX, null, DATABASE_VERSION);
             mContext = context;
             mProvider = provider;
             mDateFormat = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss.SSS");
@@ -195,11 +212,12 @@ public class StoreProvider extends ContentProvider {
 	                    + Base.KEY + " TEXT PRIMARY KEY,"
 	                    + Base.REV + " TEXT,"
 	                    + Base.DATE + " INTEGER,"
-	                    + Base.DIRTY + " INTEGER DEFAULT 0"
+	                    + Base.DIRTY + " INTEGER DEFAULT 0,"
+	                    + Base.CHANGES + " TEXT"
 	                    + ");");
 	            columns = new ArrayList<String>();
 	            getTableColumnMap(db).put(kind, columns);
-	            Collections.addAll(columns, new String[] {Base.KEY, Base.REV, Base.DATE, Base.DIRTY});
+	            Collections.addAll(columns, new String[] {Base.KEY, Base.REV, Base.DATE, Base.DIRTY, Base.CHANGES});
         	}
         	return columns;
         }
@@ -307,7 +325,7 @@ public class StoreProvider extends ContentProvider {
         	ContentValues values = new ContentValues();
         	
         	values.clear();
-    		values.put(Meta.STATUS, "Looking up existing entities");
+    		values.put(Meta_Table.STATUS, "Looking up existing entities");
             mProvider.update(metaUpdateUri, values, null, null);
         	
 			Map<String, Pair<String, Integer>> presentRevs = new HashMap<String, Pair<String, Integer>>();
@@ -324,8 +342,8 @@ public class StoreProvider extends ContentProvider {
             }
             
     		values.clear();
-    		values.put(Meta.PROGRESS_PERCENT, 0);
-    		values.put(Meta.STATUS, "Inserting " + 0 + "/" + count);
+    		values.put(Meta_Table.PROGRESS_PERCENT, 0);
+    		values.put(Meta_Table.STATUS, "Inserting " + 0 + "/" + count);
             mProvider.update(metaUpdateUri, values, null, null);
     		
             // TODO Use app here also.
@@ -352,8 +370,8 @@ public class StoreProvider extends ContentProvider {
 				Log.e(TAG, "Could not parse JSON, data was not an array. Skipping parse of " + kind);
 
 				values.clear();
-				values.put(Meta.PROGRESS_PERCENT, 0);
-				values.put(Meta.STATUS, "Error in JSON data");
+				values.put(Meta_Table.PROGRESS_PERCENT, 0);
+				values.put(Meta_Table.STATUS, "Error in JSON data");
 			    mProvider.update(metaUpdateUri, values, null, null);
 			    return;
 			}
@@ -383,8 +401,8 @@ public class StoreProvider extends ContentProvider {
 	        		}
 
 					values.clear();
-		    		values.put(Meta.PROGRESS_PERCENT, (int)((writes / (float)count) * 100));
-		    		values.put(Meta.STATUS, "Inserting " + writes + "/" + count + ", " + String.format("%.1f", lastRate) + " writes/sec");
+		    		values.put(Meta_Table.PROGRESS_PERCENT, (int)((writes / (float)count) * 100));
+		    		values.put(Meta_Table.STATUS, "Inserting " + writes + "/" + count + ", " + String.format("%.1f", lastRate) + " writes/sec");
 		            mProvider.update(metaUpdateUri, values, null, null);
 		            
 	        	    db.setTransactionSuccessful();
@@ -610,20 +628,118 @@ public class StoreProvider extends ContentProvider {
         public void onUpgrade(SQLiteDatabase db, int oldVersion, int newVersion) {
             Log.w(TAG, "Upgrading database from version " + oldVersion + " to "
                     + newVersion + ", which will destroy all old data");
-            // TODO Find listing of all tables, drop them
-            //db.execSQL("DROP TABLE IF EXISTS each_table_goes_here");
+            // TODO Check for any uncommitted dirty changes here before proceeding.
+            for (String table : getTableColumnMap(db).keySet()) {
+                db.execSQL("DROP TABLE IF EXISTS \"" + table + "\"");
+            }
+            mTableColumnMap.clear();
+            populateTableColumnMap(db);
             onCreate(db);
         }
     }
     
     public void updateAllFromJson(String app, String kind, JsonParser jp, int count, Uri updateUri) {
     	// Get the database and run the query
-        SQLiteDatabase db = mOpenHelper.getWritableDatabase();
-    	mOpenHelper.insertAllFromJson(db, app, kind, jp, count, updateUri, Mode.UPSERT);
+        SQLiteDatabase db = getOpenHelper(app).getWritableDatabase();
+    	getOpenHelper(app).insertAllFromJson(db, app, kind, jp, count, updateUri, Mode.UPSERT);
     }
 
+    public class UploadData {
+    	UploadData() {
+    		count = 0;
+    		data = "";
+    		error = false;
+    	}
+    	int count;
+    	String data;
+    	boolean error;
+    }
+    
+    public UploadData startUploadTransactionForKind(String app, String kind, Uri uri) {
+    	UploadData response = new UploadData();
+    	response.data = "[";
+    	
+        SQLiteDatabase db = getOpenHelper(app).getWritableDatabase();
+        db.beginTransaction();
+    	
+    	Cursor c = query(uri, new String[] { Base.KEY, Base.CHANGES }, Base.DIRTY + " = 1", null, null);
+    	c.moveToFirst();
+    	int changesCol = c.getColumnIndex(Base.CHANGES);
+    	int keyCol = c.getColumnIndex(Base.KEY);
+    	boolean first = true;
+    	while (!c.isAfterLast()) {
+    		if (first) {
+    			first = false;
+    		} else {
+    			response.data += ",\n";
+    		}
+    		String dataWithKey = null;
+    		String key = c.getString(keyCol);
+    		String data = c.getString(changesCol);
+    		
+			try {
+				@SuppressWarnings("unchecked")
+				Map<String, Object> values = mObjectMapper.readValue(data, Map.class);
+	    		values.put(Base.KEY, key);
+	    		dataWithKey = mObjectMapper.writeValueAsString(values);
+			} catch (JsonParseException e) {
+				// TODO Auto-generated catch block
+				e.printStackTrace();
+			} catch (JsonMappingException e) {
+				// TODO Auto-generated catch block
+				e.printStackTrace();
+			} catch (IOException e) {
+				// TODO Auto-generated catch block
+				e.printStackTrace();
+			}
+    		if (dataWithKey == null) {
+    			Log.e(TAG, "Could not upload data for row: " + uri + ", " + key);
+    			response.error = true;
+    			dataWithKey = "{}";
+    		}
+    		response.data += dataWithKey;
+    		response.count++;
+    			
+    		c.moveToNext();
+    	}
+    	response.data += "]\n";
+    	c.close();
+    	return response;
+    }
+    
+    public void finishUploadTransactionForKind(String app, String kind, Uri uri, UploadData upload, boolean error) {
+        SQLiteDatabase db = getOpenHelper(app).getWritableDatabase();
+        
+        try {
+        	if (!error && upload.count > 0) {
+        		String kindQuoted = "\"" + kind + "\"";
+        		ContentValues values = new ContentValues();
+        		values.put(Base.DIRTY, 0);
+        		values.putNull(Base.CHANGES);
+        		String where = Base.DIRTY + " = 1";
+        		String queryWhere = extractWhereFromUri(uri);
+        		if (queryWhere.length() > 0) {
+        			where = "(" + queryWhere + ") AND " + where;
+        		}
+        		int count = db.update(kindQuoted, values, where, null);
+        		if (upload.count != count) {
+        			Log.e(TAG, "Error: number of entities changed before / after update: " + kind + 
+        					", before=" + upload.count + ", after=" + count);
+        			error = true;
+        		}
+        	}
+        	if (!error) {
+        		db.setTransactionSuccessful();
+        	}
+        } finally {
+        	db.endTransaction();
+        }
+    }
+    
     private MetaDatabaseHelper mMetaOpenHelper;
-    private DatabaseHelper mOpenHelper;
+    private Map<String, DatabaseHelper> mOpenHelperMap;
+
+	private ObjectMapper mObjectMapper;
     
 	class Progress {
 		boolean syncActive = false;
@@ -639,40 +755,74 @@ public class StoreProvider extends ContentProvider {
 		return mActiveSyncMap.get(key);
 	}
     
+	DatabaseHelper getOpenHelper(String app) {
+		DatabaseHelper helper = mOpenHelperMap.get(app);
+		if (helper == null) {
+			Log.i(TAG, "Creating database helper for : " + app);
+			if (!DatabaseHelper.isValidAppString(app)) {
+				throw new IllegalArgumentException("Invalid app name : " + app);
+			}
+			helper = new DatabaseHelper(getContext(), this, app);
+			mOpenHelperMap.put(app, helper);
+		}
+		return helper;
+	}
+	
 	@Override
 	public boolean onCreate() {
         mMetaOpenHelper = new MetaDatabaseHelper(getContext(), this);
-        mOpenHelper = new DatabaseHelper(getContext(), this);
+        mOpenHelperMap = new HashMap<String, DatabaseHelper>();
         mActiveSyncMap = new HashMap<String,Progress>();
+        mObjectMapper = new ObjectMapper();
         return true;
 	}
 
-	public Cursor metaQuery(int type, Uri uri, String[] projection, String selection,
+	public Cursor metaTableQuery(int type, Uri uri, String[] projection, String selection,
 			String[] selectionArgs, String sortOrder) {
 		final String pathQuery = getPathQuery(uri);
 		
 		SQLiteDatabase db = mMetaOpenHelper.getReadableDatabase();
         SQLiteQueryBuilder qb = new SQLiteQueryBuilder();
-        qb.setTables(Meta.TABLE_NAME);
-        if (type == ITEM_META) {
-        	qb.appendWhere(Meta.PATH_QUERY + " = '" + pathQuery + "'");
-        } else if (type == ITEM_TABLES) {
-        	qb.appendWhere(Meta.PATH_QUERY + " LIKE '" + pathQuery + "%'");
+        qb.setTables(Meta_Table.TABLE_NAME);
+        if (type == ITEM_TABLE) {
+        	qb.appendWhere(Meta_Table.PATH_QUERY + " = '" + pathQuery + "'");
+        } else if (type == ITEM_TABLE_LIST) {
+        	qb.appendWhere(Meta_Table.PATH_QUERY + " LIKE '" + pathQuery + "%'");
         }
         
         if (sortOrder == null || sortOrder.length() == 0) {
-        	sortOrder = Meta.DEFAULT_SORT_ORDER;
+        	sortOrder = Meta_Table.DEFAULT_SORT_ORDER;
         }
-		Cursor c = qb.query(db, Meta.SQL_COLUMNS, selection, selectionArgs, null, null, sortOrder);
+		Cursor c = qb.query(db, Meta_Table.SQL_COLUMNS, selection, selectionArgs, null, null, sortOrder);
 		Cursor newCursor = progressCursorFromMetaTable(c);
 		c.close();
 		return newCursor;
 	}
 	
+	public Cursor metaMappingQuery(int type, Uri uri, String[] projection, String selection,
+			String[] selectionArgs, String sortOrder) {
+		SQLiteDatabase db = mMetaOpenHelper.getReadableDatabase();
+        SQLiteQueryBuilder qb = new SQLiteQueryBuilder();
+        qb.setTables(Meta_Mapping.TABLE_NAME);
+        if (type == ITEM_MAPPING) {
+        	List<String> path = uri.getPathSegments();
+    		String app = null;
+    		app = path.get(1);
+        	qb.appendWhere(Meta_Mapping.APP + " = '" + app + "'");
+        }
+        
+        if (sortOrder == null || sortOrder.length() == 0) {
+        	sortOrder = Meta_Mapping.DEFAULT_SORT_ORDER;
+        }
+		Cursor c = qb.query(db, projection, selection, selectionArgs, null, null, sortOrder);
+		
+		return c;
+	}
+	
 	public MatrixCursor progressCursorFromMetaTable(Cursor old) {
 		old.moveToFirst();
 		int length = old.getCount();
-		MatrixCursor newCursor = new MatrixCursor(Meta.ALL_COLUMNS, length);
+		MatrixCursor newCursor = new MatrixCursor(Meta_Table.ALL_COLUMNS, length);
 		while (!old.isAfterLast()) {
 			// TODO increase column selection safety / hygiene here
 			Progress p = getActiveSyncProgress(old.getString(1));
@@ -685,12 +835,36 @@ public class StoreProvider extends ContentProvider {
 		return newCursor;
 	}
 	
+	static public String extractWhereFromUri(Uri uri) {
+		String where = "";
+		if (uri.getEncodedQuery() != null && uri.getEncodedQuery().length() > 0) {
+			Map<String, String> query = Util.getQueryComponents(uri);
+			for (Entry<String, String> s : query.entrySet()) {
+				if (where.length() > 0) {
+					where += " AND ";
+				}
+				where += s.getKey() + "= \"" + s.getValue() + "\"";
+			}
+		}
+		return where;
+	}
+	
+	static public void extractWhereFromUri(SQLiteQueryBuilder qb, Uri uri) {
+		String where = extractWhereFromUri(uri);
+		if (where.length() > 0) {
+			qb.appendWhere(where);
+		}
+	}
+	
 	@Override
 	public Cursor query(Uri uri, String[] projection, String selection,
 			String[] selectionArgs, String sortOrder) {
 		int uriType = sUriMatcher.match(uri);
-		if (uriType == ITEM_META || uriType == ITEM_TABLES) {
-			return metaQuery(uriType, uri, projection, selection, selectionArgs, sortOrder);
+		if (uriType == ITEM_TABLE || uriType == ITEM_TABLE_LIST) {
+			return metaTableQuery(uriType, uri, projection, selection, selectionArgs, sortOrder);
+		}
+		if (uriType == ITEM_MAPPING || uriType == ITEM_MAPPING_LIST) {
+			return metaMappingQuery(uriType, uri, projection, selection, selectionArgs, sortOrder);
 		}
 		
 		List<String> path = uri.getPathSegments();
@@ -719,14 +893,14 @@ public class StoreProvider extends ContentProvider {
 		}
 		String quotedKind = "'" + kind + "'";
 		
-        SQLiteDatabase writableDb = mOpenHelper.getWritableDatabase();
+        SQLiteDatabase writableDb = getOpenHelper(app).getWritableDatabase();
         SQLiteQueryBuilder qb = new SQLiteQueryBuilder();
         // Check tables for existence
         if (writableDb != null) {
-        	List<String> columns = mOpenHelper.getOrCreateKindTable(writableDb, app, kind);
+        	List<String> columns = getOpenHelper(app).getOrCreateKindTable(writableDb, app, kind);
         	List<String> joinColumns = null;
         	if (joinKind != null) {
-            	joinColumns = mOpenHelper.getOrCreateKindTable(writableDb, app, joinKind);
+            	joinColumns = getOpenHelper(app).getOrCreateKindTable(writableDb, app, joinKind);
         	}
         	if (projection != null) {
 		        for (int i = 0; i < projection.length; ++i) {
@@ -742,18 +916,12 @@ public class StoreProvider extends ContentProvider {
         qb.setTables(quotedKind);
 
         // Extract any select arguments from the query param.
-		if (uri.getEncodedQuery() != null && uri.getEncodedQuery().length() > 0) {
-			Map<String, String> query = Util.getQueryComponents(uri);
-			for (Entry<String, String> s : query.entrySet()) {
-				qb.appendWhere(s.getKey() + "= \"" + s.getValue() + "\"");
-				Log.i(TAG, s.getKey() + "= \"" + s.getValue() + "\"");
-			}
-		}
+		extractWhereFromUri(qb, uri);
         
         switch (sUriMatcher.match(uri)) {
         case ITEM_LIST:
         	if (joinKind != null) {
-        		String joinColumn = mOpenHelper.findJoinColumn(writableDb, app, kind, joinKind);
+        		String joinColumn = getOpenHelper(app).findJoinColumn(writableDb, app, kind, joinKind);
         		if (joinColumn == null) {
         			// TODO This code makes things more strict, but it causes initial opening to fail.
         			// if (selection == null) {
@@ -790,7 +958,7 @@ public class StoreProvider extends ContentProvider {
         }
         
         // Get the database and run the query
-        SQLiteDatabase db = mOpenHelper.getReadableDatabase();
+        SQLiteDatabase db = getOpenHelper(app).getReadableDatabase();
         if (projection == null) {
         	projection = new String[] { "*", quotedKind + ".rowid as _id"};
         } else {
@@ -836,14 +1004,24 @@ public class StoreProvider extends ContentProvider {
 				return Store.Base.CONTENT_ITEM_TYPE_BASE + path.get(0) + "." + path.get(1);
 			}
 			
-			case ITEM_TABLES:
+			case ITEM_TABLE_LIST:
 			{
-				return Store.Meta.CONTENT_TYPE;
+				return Store.Meta_Table.CONTENT_TYPE;
 			}
 			
-			case ITEM_META:
+			case ITEM_TABLE:
 			{
-				return Store.Meta.CONTENT_ITEM_TYPE;
+				return Store.Meta_Table.CONTENT_ITEM_TYPE;
+			}
+			
+			case ITEM_MAPPING_LIST:
+			{
+				return Store.Meta_Mapping.CONTENT_TYPE;
+			}
+			
+			case ITEM_MAPPING:
+			{
+				return Store.Meta_Mapping.CONTENT_ITEM_TYPE;
 			}
 			
 			default:
@@ -851,7 +1029,7 @@ public class StoreProvider extends ContentProvider {
 		}
 	}
 
-	public Uri metaInsert(Uri uri, ContentValues values) {
+	public Uri metaTableInsert(Uri uri, ContentValues values) {
 		String pathQuery = getPathQuery(uri);
 		
 		if (values != null && values.size() > 0) {
@@ -859,12 +1037,30 @@ public class StoreProvider extends ContentProvider {
 		}
 		
 		ContentValues initialValues = new ContentValues();
-		initialValues.put(Meta.PATH_QUERY, pathQuery);
+		initialValues.put(Meta_Table.PATH_QUERY, pathQuery);
 		
 		SQLiteDatabase db = mMetaOpenHelper.getWritableDatabase();
-		if (db.insertWithOnConflict(Meta.TABLE_NAME, null, initialValues, SQLiteDatabase.CONFLICT_IGNORE) == -1) {
+		if (db.insertWithOnConflict(Meta_Table.TABLE_NAME, null, initialValues, SQLiteDatabase.CONFLICT_IGNORE) == -1) {
 			// TODO error occurred
 			Log.e(TAG, "Could not insert meta entity: " + pathQuery);
+		}
+		
+        getContext().getContentResolver().notifyChange(uri, null);
+		return uri;
+	}
+	
+	public Uri metaMappingInsert(Uri uri, ContentValues values) {
+		List<String> path = uri.getPathSegments();
+		String app = path.get(1);
+		
+		ContentValues initialValues = new ContentValues();
+		initialValues.putAll(values);
+		initialValues.put(Meta_Mapping.APP, app);
+		
+		SQLiteDatabase db = mMetaOpenHelper.getWritableDatabase();
+		if (db.insertWithOnConflict(Meta_Mapping.TABLE_NAME, null, initialValues, SQLiteDatabase.CONFLICT_IGNORE) == -1) {
+			// TODO error occurred
+			Log.e(TAG, "Could not insert meta entity: " + app);
 		}
 		
         getContext().getContentResolver().notifyChange(uri, null);
@@ -875,8 +1071,11 @@ public class StoreProvider extends ContentProvider {
 	public Uri insert(Uri uri, ContentValues values) {
 		int uriType = sUriMatcher.match(uri);
 		
-		if (uriType == ITEM_META) {
-			return metaInsert(uri, values);
+		switch (uriType) {
+		case ITEM_TABLE: 
+			return metaTableInsert(uri, values);
+		case ITEM_MAPPING:
+			return metaMappingInsert(uri, values);	
 		}
 		
 		return null;
@@ -901,77 +1100,197 @@ public class StoreProvider extends ContentProvider {
 		return pathQuery;
 	}
 	
-	public int metaUpdate(Uri uri, ContentValues values, String where, String[] whereArgs) {
+	public int metaTableUpdate(Uri uri, ContentValues values, String where, String[] whereArgs) {
 		if (where != null && where.length() > 0) {
             throw new IllegalArgumentException("Illegal selection to URI " + uri);
 		}
 		
 		String pathQuery = getPathQuery(uri);
 		
-		if (values.containsKey(Meta.SYNC_ACTIVE)) {
-			getActiveSyncProgress(pathQuery).syncActive = values.getAsBoolean(Meta.SYNC_ACTIVE);
-			values.remove(Meta.SYNC_ACTIVE);
+		if (values.containsKey(Meta_Table.SYNC_ACTIVE)) {
+			getActiveSyncProgress(pathQuery).syncActive = values.getAsBoolean(Meta_Table.SYNC_ACTIVE);
+			values.remove(Meta_Table.SYNC_ACTIVE);
 		}
-		if (values.containsKey(Meta.PROGRESS_PERCENT)) {
-			getActiveSyncProgress(pathQuery).progressPercent = values.getAsInteger(Meta.PROGRESS_PERCENT);
-			values.remove(Meta.PROGRESS_PERCENT);
+		if (values.containsKey(Meta_Table.PROGRESS_PERCENT)) {
+			getActiveSyncProgress(pathQuery).progressPercent = values.getAsInteger(Meta_Table.PROGRESS_PERCENT);
+			values.remove(Meta_Table.PROGRESS_PERCENT);
 		}
-		if (values.containsKey(Meta.STATUS)) {
-			getActiveSyncProgress(pathQuery).status = values.getAsString(Meta.STATUS);
-			values.remove(Meta.STATUS);
+		if (values.containsKey(Meta_Table.STATUS)) {
+			getActiveSyncProgress(pathQuery).status = values.getAsString(Meta_Table.STATUS);
+			values.remove(Meta_Table.STATUS);
 		}
 		
 		int count = 1;
 		if (values.size() > 0) {
 			SQLiteDatabase db = mMetaOpenHelper.getWritableDatabase();
-			count = db.update(Meta.TABLE_NAME, values, Meta.PATH_QUERY + "= \"" + pathQuery + "\"", null);
+			count = db.update(Meta_Table.TABLE_NAME, values, Meta_Table.PATH_QUERY + "= \"" + pathQuery + "\"", null);
 		}
   
 		getContext().getContentResolver().notifyChange(uri, null);
 		return count;
 	}
 	
+	public int metaMappingUpdate(Uri uri, ContentValues values, String where, String[] whereArgs) {
+		if (where != null && where.length() > 0) {
+            throw new IllegalArgumentException("Illegal selection to URI " + uri);
+		}
+		
+		List<String> path = uri.getPathSegments();
+		String app = path.get(1);
+		
+		SQLiteDatabase db = mMetaOpenHelper.getWritableDatabase();
+		int count = db.update(Meta_Mapping.TABLE_NAME, values, Meta_Mapping.APP + "= \"" + app + "\"", null);
+  
+		getContext().getContentResolver().notifyChange(uri, null);
+		return count;
+	}
+	
+	@SuppressWarnings("unchecked")
 	@Override
 	public int update(Uri uri, ContentValues values, String where,
 			String[] whereArgs) {
 		int uriType = sUriMatcher.match(uri);
 		
-		if (uriType == ITEM_META) {
-			return metaUpdate(uri, values, where, whereArgs);
+		switch (uriType) {
+		case ITEM_TABLE: 
+			return metaTableUpdate(uri, values, where, whereArgs);
+		case ITEM_MAPPING:
+			return metaMappingUpdate(uri, values, where, whereArgs);
+		case ITEM_KEY:
+		case ITEM_LIST:
+			// Do nothing
+			break;
+		default:
+            throw new IllegalArgumentException("Unknown URI " + uri);
+		}
+		
+		// Do nothing if there are no changes to be made.
+		if (values == null || values.size() == 0) {
+			return 0;
 		}
 		
 		List<String> path = uri.getPathSegments();
 		// TODO validate path
 		String app = path.get(0);
 		String kind = path.get(1);
+		String kindQuoted = "\"" + kind + "\"";
 		String key = null;
 		if (path.size() > 2) {
 			key = path.get(2);
 		}
 		
-        SQLiteDatabase db = mOpenHelper.getWritableDatabase();
+        SQLiteDatabase db = getOpenHelper(app).getWritableDatabase();
         // Check tables for existence
         if (values != null) {
         	Iterator<Entry<String, Object>> iter = values.valueSet().iterator();
 	        while (iter.hasNext()) {
-	        	mOpenHelper.createColumn(db, app, kind, iter.next().getKey());
+	        	getOpenHelper(app).createColumn(db, app, kind, iter.next().getKey());
 	        }
         }
         
-        int count;
-        switch (uriType) {
-        case ITEM_LIST:
-            count = db.update(kind, values, where, whereArgs);
-            break;
+        // TODO Plan for update:
+        // Produce JSON version of values
+        // Start TX
+        // Query all affected entities
+        // If any are __dirty__ and have __changes__, merge changes
+        // Apply each change (to individual entities, and/or to the whole list)
+        // For the whole list, assume we apply to all assuming not-dirty, and then 
+        //              fix the dirty ones (this does not scale)
+        // Or, for changing multiple entities, simply do one at a time:
+        // for entities with where AND __dirty__ == true : apply merge
+        // for entities with where and __dirty__ == false: just add data
 
-        case ITEM_KEY:
-            // TODO protect against SQL injection attack
-            count = db.update(kind, values, Base.KEY + "= \"" + key + "\""
-                    + (!TextUtils.isEmpty(where) ? " AND (" + where + ')' : ""), whereArgs);
-            break;
+        String whereSuffix = " ";
+        if (uriType == ITEM_KEY) {
+        	whereSuffix += "AND (" + Base.KEY + " = \"" + key + "\") ";
+        }
+        whereSuffix += (!TextUtils.isEmpty(where) ? "AND (" + where + ") " : "");
+        
+        String queryWhere = extractWhereFromUri(uri);
+        whereSuffix += (!TextUtils.isEmpty(queryWhere) ? "AND (" + queryWhere + ") " : "");
+        
+        String changed = null;
+        HashMap<String, Object> changes = new HashMap<String, Object>();
+        for (Entry<String, Object> e : values.valueSet()) {
+        	changes.put(e.getKey(), e.getValue());
+        }
+        
+        try {
+			changed = mObjectMapper.writeValueAsString(changes);
+		} catch (JsonGenerationException e1) {
+			// TODO Auto-generated catch block
+			e1.printStackTrace();
+		} catch (JsonMappingException e1) {
+			// TODO Auto-generated catch block
+			e1.printStackTrace();
+		} catch (IOException e1) {
+			// TODO Auto-generated catch block
+			e1.printStackTrace();
+		}
+		if (changed == null) {
+            throw new IllegalArgumentException("Could not serialize data for update: " + values.toString());
+		}
+		
+        values.put(Base.DIRTY, 1);
+        
+        int count = 0;
+        db.beginTransaction();
+        try {
+        
+        	Cursor c = db.query(kindQuoted, new String[] { Base.KEY, Base.CHANGES }, 
+        			"(" + Base.DIRTY + " = 1)" + whereSuffix, whereArgs, null, null, null);
+        	
+        	c.moveToFirst();
+        	while (!c.isAfterLast()) {
+        		String rowKey = c.getString(0);
+        		String rowChanged = c.getString(1);
+        		
+        		Map<String, Object> rowChanges = null;
+        		try {
+					rowChanges = mObjectMapper.readValue(rowChanged, Map.class);
+				} catch (JsonParseException e1) {
+					// TODO Auto-generated catch block
+					e1.printStackTrace();
+				} catch (JsonMappingException e1) {
+					// TODO Auto-generated catch block
+					e1.printStackTrace();
+				} catch (IOException e1) {
+					// TODO Auto-generated catch block
+					e1.printStackTrace();
+				}
+				if (rowChanges == null) {
+		            throw new IllegalArgumentException("Could not parse existing changes for row " + uri + ", " + 
+		            		rowKey + ": " + rowChanged);
+				}
+				rowChanges.putAll(changes);
+				try {
+					rowChanged = mObjectMapper.writeValueAsString(rowChanges);
+				} catch (JsonGenerationException e1) {
+					// TODO Auto-generated catch block
+					e1.printStackTrace();
+				} catch (JsonMappingException e1) {
+					// TODO Auto-generated catch block
+					e1.printStackTrace();
+				} catch (IOException e1) {
+					// TODO Auto-generated catch block
+					e1.printStackTrace();
+				}
+				if (changed == null) {
+		            throw new IllegalArgumentException("Could not serialize data for update: " + rowChanges.toString());
+				}
+				values.put(Base.CHANGES, rowChanged);
 
-        default:
-            throw new IllegalArgumentException("Unknown URI " + uri);
+	        	count += db.update(kindQuoted, values, "(" + Base.KEY + " = \"" + rowKey + "\")" + whereSuffix, whereArgs);
+	        	c.moveToNext();
+        	}
+        	c.close();
+        	
+        	values.put(Base.CHANGES, changed);
+        	count += db.update(kindQuoted, values, "(" + Base.DIRTY + " = 0)" + whereSuffix, whereArgs);
+        	
+        	db.setTransactionSuccessful();
+        } finally {
+        	db.endTransaction();
         }
 
         getContext().getContentResolver().notifyChange(uri, null);
@@ -981,9 +1300,11 @@ public class StoreProvider extends ContentProvider {
 	
 	static {
         sUriMatcher = new UriMatcher(UriMatcher.NO_MATCH);
-        sUriMatcher.addURI(Store.AUTHORITY, Meta.TABLE_NAME + "/*/*", ITEM_META);
-        sUriMatcher.addURI(Store.AUTHORITY, Meta.TABLE_NAME + "/*", ITEM_TABLES);
-        sUriMatcher.addURI(Store.AUTHORITY, Meta.TABLE_NAME + "/", ITEM_TABLES);
+        sUriMatcher.addURI(Store.AUTHORITY, Meta_Table.TABLE_NAME + "/*/*", ITEM_TABLE);
+        sUriMatcher.addURI(Store.AUTHORITY, Meta_Table.TABLE_NAME + "/*", ITEM_TABLE_LIST);
+        sUriMatcher.addURI(Store.AUTHORITY, Meta_Table.TABLE_NAME + "/", ITEM_TABLE_LIST);
+        sUriMatcher.addURI(Store.AUTHORITY, Meta_Mapping.TABLE_NAME + "/*", ITEM_MAPPING);
+        sUriMatcher.addURI(Store.AUTHORITY, Meta_Mapping.TABLE_NAME + "/", ITEM_MAPPING_LIST);
         sUriMatcher.addURI(Store.AUTHORITY, "*/*", ITEM_LIST);
         sUriMatcher.addURI(Store.AUTHORITY, "*/*/*", ITEM_KEY);
 	}

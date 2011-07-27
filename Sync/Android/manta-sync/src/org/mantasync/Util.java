@@ -25,7 +25,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
-import org.mantasync.Store.Meta;
+import org.mantasync.Store.Meta_Table;
 
 
 import android.accounts.Account;
@@ -119,8 +119,8 @@ public class Util {
         Cursor c = resolver.query(uri, null, null, null, null);
         c.moveToFirst();
         while (!c.isAfterLast()) {
-        	String pathQuery = c.getString(c.getColumnIndex(Meta.PATH_QUERY));
-        	if (c.getLong(c.getColumnIndex(Meta.LAST_SYNCED)) == 0) {
+        	String pathQuery = c.getString(c.getColumnIndex(Meta_Table.PATH_QUERY));
+        	if (c.getLong(c.getColumnIndex(Meta_Table.LAST_SYNCED)) == 0) {
         		Log.e(TAG, "Must sync before continuing: " + pathQuery);
         		syncRequired = true;
         	}

@@ -19,7 +19,7 @@ import java.util.List;
 
 
 import org.mantasync.R;
-import org.mantasync.Store.Meta;
+import org.mantasync.Store.Meta_Table;
 
 import android.accounts.Account;
 import android.app.AlertDialog;
@@ -74,7 +74,7 @@ public class SyncActivity extends ListActivity {
 		
 		if (getIntent().getData() == null) {
 			// We were launched without context. Set the URI to the entire sync store.
-			getIntent().setData(Store.Meta.CONTENT_URI);
+			getIntent().setData(Store.Meta_Table.CONTENT_URI);
 		}
 		mURI = getIntent().getData();
 		
@@ -89,15 +89,15 @@ public class SyncActivity extends ListActivity {
         Cursor cursor = managedQuery(mURI, null, null, null, null);
         
         final SimpleCursorAdapter adapter = new SimpleCursorAdapter(this, R.layout.sync_item, cursor,
-                new String[] { Meta.PATH_QUERY, Meta.PROGRESS_PERCENT, Meta.STATUS  }, 
+                new String[] { Meta_Table.PATH_QUERY, Meta_Table.PROGRESS_PERCENT, Meta_Table.STATUS  }, 
                 new int[] { android.R.id.text1, R.id.sync_progress, R.id.text3 } );
         setListAdapter(adapter);
         
         adapter.setViewBinder(new ViewBinder() {
 			@Override
 			public boolean setViewValue(View view, Cursor cursor, int columnIndex) {
-				final int progressIndex = cursor.getColumnIndex(Meta.PROGRESS_PERCENT);
-				final int pathQueryIndex = cursor.getColumnIndex(Meta.PATH_QUERY);
+				final int progressIndex = cursor.getColumnIndex(Meta_Table.PROGRESS_PERCENT);
+				final int pathQueryIndex = cursor.getColumnIndex(Meta_Table.PATH_QUERY);
 				if (columnIndex == progressIndex) {
 					int progress = cursor.getInt(progressIndex);
 					ProgressBar pb = (ProgressBar)view.findViewById(R.id.sync_progress);
@@ -137,20 +137,19 @@ public class SyncActivity extends ListActivity {
         	@Override
         	public void onChange(boolean selfChange) {
         		adapter.changeCursor(
-        				managedQuery(Meta.CONTENT_URI.buildUpon().appendEncodedPath("app/").build(), 
-        						null, null, null, null));
+        				managedQuery(mURI, null, null, null, null));
         		Cursor c = adapter.getCursor();
 
         		boolean syncComplete = true;
         		c.moveToFirst();
         		while (!c.isAfterLast()) {
-        			if (c.getInt(c.getColumnIndex(Meta.SYNC_ACTIVE)) == 1) {
-        				String message = "Sync progress: " + c.getString(c.getColumnIndex(Meta.PATH_QUERY)) 
-        					+ " " + c.getInt(c.getColumnIndex(Meta.PROGRESS_PERCENT)) + "% " 
-        					+ c.getString(c.getColumnIndex(Meta.STATUS));
+        			if (c.getInt(c.getColumnIndex(Meta_Table.SYNC_ACTIVE)) == 1) {
+        				String message = "Sync progress: " + c.getString(c.getColumnIndex(Meta_Table.PATH_QUERY)) 
+        					+ " " + c.getInt(c.getColumnIndex(Meta_Table.PROGRESS_PERCENT)) + "% " 
+        					+ c.getString(c.getColumnIndex(Meta_Table.STATUS));
         				Log.e(TAG, message);
         			}
-        			if (c.getLong(c.getColumnIndex(Meta.LAST_SYNCED)) == 0) {
+        			if (c.getLong(c.getColumnIndex(Meta_Table.LAST_SYNCED)) == 0) {
         				syncComplete = false;
         			}
         			c.moveToNext();
@@ -166,9 +165,7 @@ public class SyncActivity extends ListActivity {
         	}
         };
 
-        getContentResolver().registerContentObserver(
-        		Meta.CONTENT_URI.buildUpon().appendEncodedPath("app/").build(), 
-        		true, mContentObserver);
+        getContentResolver().registerContentObserver(mURI, true, mContentObserver);
         
         mDone = (Button)findViewById(R.id.sync_done_button);
         mDone.setClickable(neededTablesInitiallyPresent);
