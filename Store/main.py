@@ -65,6 +65,31 @@ class MainHandler(webapp.RequestHandler):
             self.response.out.write(result)
             self.response.out.write("\n")
 
+        elif (app and kind and not id):
+            try:
+                data_obj = json.loads(data, use_decimal=True)
+            except json.JSONDecodeError:
+                self.response.set_status(500)
+                self.response.clear()
+                return
+            if not isinstance(data_obj, list):
+                self.response.set_status(500)
+                self.response.clear()
+                return
+            for data in data_obj:
+                if not 'key' in data:
+                    self.response.set_status(500)
+                    self.response.clear()
+                    return
+
+            count = 0
+            for data in data_obj:
+                datastore.RunInTransaction(
+                    store.update_entity, app, kind, data['key'], data)
+                count += 1
+            
+            self.response.out.write(count)
+            self.response.out.write("\n")
 
     def get(self):
         if not IsAuthTokenValid(self.request):

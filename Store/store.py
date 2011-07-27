@@ -22,7 +22,9 @@ _facets = {
   'app2': ['officerid'],
 }
 def GetFacetsForApp(app):
-  return _facets[app]
+  if app in _facets:
+    return _facets[app]
+  return []
 def is_facet_property(p):
   return p.startswith(FACET_PREFIX)
 def facet_property_name(p):
@@ -180,6 +182,8 @@ def get_entity(app, kind, id):
         pass
     return entity
 
+_UNPARSED_SENTINEL = {}
+
 def get_entities(app, kind, params=None):
     query = datastore.Query(kind=kind, namespace=app)
     facets = GetFacetsForApp(app)
@@ -193,7 +197,16 @@ def get_entities(app, kind, params=None):
           property_name = param
           if param in facets:
             property_name = facet_property_name(param)
-          query[property_name + ' ='] = params.getone(param)
+          value = params.getone(param)
+          value_native = _UNPARSED_SENTINEL
+          try:
+            value_native = json.loads(value)
+          except json.JSONDecodeError, ValueError:
+            pass
+          if value_native is _UNPARSED_SENTINEL:
+            # If it could not be parsed, assume an unquoted string
+            value_native = value
+          query[property_name + ' ='] = value_native
     return query.Run()
 
 def output_entity(entity):
