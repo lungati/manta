@@ -93,7 +93,7 @@ def produce_delta(file1, file2):
         # Note: Not safe for escaped comma lines.
         (key, rest) = line.strip().split(',', 1)
         assert not key in file1_lines, \
-            "Duplicate key found: " + key
+            "Duplicate pre-existing key found: " + key + " in file: " + str(file1)
         assert len(rest.split(',')) == len(file1_columns) - 1, \
             "Could not split CSV row property: row contains an extra comma: " + line.strip()
         rest_values = dict(zip(file1_columns_rest, rest.split(',')))
@@ -115,14 +115,14 @@ def produce_delta(file1, file2):
         assert len(rest_values) + 1 == output_len
         if not key in file1_lines:
             assert not key in insert, \
-                "Duplicate key found: " + key
+                "Duplicate insertion key found: " + key + " in file: " + str(file2)
             insert[key] = rest_values
         else:
             if file1_lines[key] == rest_values:
                 pass
             else:
                 assert not key in update, \
-                    "Duplicate key found: " + key
+                    "Duplicate update key found: " + key + " in file: " + str(file2)
                 update[key] = (file1_lines[key], rest_values)
             del file1_lines[key]
     
