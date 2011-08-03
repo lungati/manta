@@ -105,18 +105,27 @@ class MainHandler(webapp.RequestHandler):
         entity = None
         if (app and kind and id):
             entity = store.get_entity(app, kind, id)
-            self.response.out.write(store.output_entity_json(entity))
-            self.response.out.write("\n")
+            if entity:
+              self.response.out.write(store.output_entity_json(entity))
+              self.response.out.write("\n")
+              self.response.headers["X-Num-Results"] = str(1)
+            else:
+              self.response.set_status(404)
+              self.response.clear()
+              return
         elif (app and kind):
             results = store.get_entities(app, kind, self.request.params)
             self.response.out.write("[\n")
             first = True
+            count = 0
             for r in results:
                 if not first:
                     self.response.out.write(",\n")
                 first = False
                 self.response.out.write(store.output_entity_json(r))
+                count += 1
             self.response.out.write("\n]\n")
+            self.response.headers["X-Num-Results"] = str(count)
         else:
             self.response.set_status(404)
             self.response.clear()
