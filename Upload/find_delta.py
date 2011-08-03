@@ -20,6 +20,7 @@
 # up changed values, but the server will do this anyway as part of the
 # update transaction.
 
+import logging
 import sys
 
 def convert_to_null(input):
@@ -65,6 +66,7 @@ def output_delta_file(file1_name, file2_name, output):
 
 def produce_delta(file1, file2):
     file1_lines = {}
+    file2_lines = {}
     file1_header = file1.readline().strip()
     file2_header = file2.readline().strip()
     file1_columns = file1_header.split(',')
@@ -92,13 +94,20 @@ def produce_delta(file1, file2):
     for line in file1:
         # Note: Not safe for escaped comma lines.
         (key, rest) = line.strip().split(',', 1)
-        assert not key in file1_lines, \
-            "Duplicate pre-existing key found: " + key + " in file: " + str(file1)
         assert len(rest.split(',')) == len(file1_columns) - 1, \
             "Could not split CSV row property: row contains an extra comma: " + line.strip()
         rest_values = dict(zip(file1_columns_rest, rest.split(',')))
         rest_values.update(added_column_map)
         assert len(rest_values) + 1 == output_len
+        if key in file1_lines:
+            if file1_lines[key] == rest_values:
+                logging.error("ERROR: Duplicate line was found in existing input file. "
+                              "Because duplicate lines match, this is being ignored. "
+                              "However, this is a sign of a serious problem in your "
+                              "database or SQL commands. Key: %s File: %s", key, file1)
+            else:
+                assert not key in file1_lines, \
+                    "Duplicate pre-existing key found: " + key + " in file: " + str(file1)
         file1_lines[key] = rest_values
 
     delete = {}
@@ -113,6 +122,17 @@ def produce_delta(file1, file2):
         rest_values = dict(zip(file2_columns_rest, rest.split(',')))
         rest_values.update(deleted_column_map)
         assert len(rest_values) + 1 == output_len
+        if key in file2_lines:
+            if file2_lines[key] == rest_values:
+                logging.error("ERROR: Duplicate line was found in new input file. "
+                              "Because duplicate lines match, this is being ignored. "
+                              "However, this is a sign of a serious problem in your "
+                              "database or SQL commands. Key: %s File: %s", key, file2)
+            else:
+                assert not key in file2_lines, \
+                    "Duplicate new key found: " + key + " in file: " + str(file2)
+        file2_lines[key] = rest_values
+
         if not key in file1_lines:
             assert not key in insert, \
                 "Duplicate insertion key found: " + key + " in file: " + str(file2)
