@@ -28,13 +28,13 @@ def convert_to_null(input):
         if input[key] is None:
             input[key] = "__null__"
 
-def output_delta_file(file1_name, file2_name, output):
+def output_delta_file(file1_name, file2_name, output, config=None):
     # Quickly get header in a temporary file.
     original_header = open(file1_name).readline().strip().split(',')[1:]
     file1 = open(file1_name)
     file2 = open(file2_name)
     
-    (key_column, delete, update, insert) = produce_delta(file1, file2)
+    (key_column, delete, update, insert) = produce_delta(file1, file2, config)
     first_update_row = update.values()[:1]
     if len(first_update_row) > 0:
         first_update_row = [first_update_row[0][1]]
@@ -64,7 +64,7 @@ def output_delta_file(file1_name, file2_name, output):
     for key in delete:
         print >> output, key + null_suffix
 
-def produce_delta(file1, file2):
+def produce_delta(file1, file2, config=None):
     file1_lines = {}
     file2_lines = {}
     file1_header = file1.readline().strip()
@@ -106,8 +106,13 @@ def produce_delta(file1, file2):
                               "However, this is a sign of a serious problem in your "
                               "database or SQL commands. Key: %s File: %s", key, file1)
             else:
-                assert not key in file1_lines, \
-                    "Duplicate pre-existing key found: " + key + " in file: " + str(file1)
+                if config and config['options'].discard_duplicate_existing_rows:
+                    logging.error("ERROR: Duplicate differing input lines were found in "
+                                  "existing input file. Due to --discard_duplicate_input_rows, "
+                                  "this will be ignored. Key: %s File: %s", key, file1)
+                else:
+                    assert not key in file1_lines, \
+                        "Duplicate pre-existing key found: " + key + " in file: " + str(file1)
         file1_lines[key] = rest_values
 
     delete = {}

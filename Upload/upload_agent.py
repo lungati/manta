@@ -280,7 +280,7 @@ def Build(directory):
         else:
             # Generate the delta, as we have both files.
             output_file = file(output_file_path, "w")
-            find_delta.output_delta_file(old_path, new_path, output_file)
+            find_delta.output_delta_file(old_path, new_path, output_file, config)
             output_file.close()
 
 def Process(directory):
@@ -374,6 +374,9 @@ def SetupLoggingAndFlags():
                       help="config module to use", default="config")
     parser.add_option("-k", "--kinds", dest="kinds",
                       help="list of kinds to actually upload", default="*")
+    parser.add_option("--discard_duplicate_existing_rows", dest="discard_duplicate_existing_rows",
+                      help="discard duplicate rows from existing input files, taking most recent", 
+                      default=False, action='store_true')
     
     (options, args) = parser.parse_args()
 
