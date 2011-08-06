@@ -31,7 +31,7 @@ $ sample/create_database.py
 $ GOOGLE_APPENGINE_SDK="path/to/google_appengine" sample/start_server.py
 $ Upload/upload_agent.py --config=sample/config.py
 ... Install Manta Sync for Android APK and Simple MFI APK ...
-Run Simple MFI with Organization "sample" and Security Token "some_secret"
+Run Simple MFI with Organization "sample" and use any value for Security Token.
 
 
 INSTRUCTIONS
