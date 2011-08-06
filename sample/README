@@ -1,0 +1,141 @@
+INTRODUCTION
+============
+
+This is a fully self-contained sample for Manta, which allows you to
+run the entire system from your local machine and the Android emulator
+(or a local phone).
+
+This sample provides a sample dataset for the Simple MFI application,
+which is an application based on Manta for microfinance loan
+officers. To use it, you will need to compile or download a copy of
+the Simple MFI application, which is available at:
+
+http://github.com/kevgibbs/simple-mfi
+
+PREREQUISITES
+=============
+
+Python 2.5 or later
+SQLite
+Google App Engine SDK
+Manta source
+Android emulator or device
+Simple MFI application
+
+
+SUMMARY
+=======
+
+$ cd Manta
+$ sample/create_database.py
+$ GOOGLE_APPENGINE_SDK="path/to/google_appengine" sample/start_server.py
+$ Upload/upload_agent.py --config=sample/config.py
+... Install Manta Sync for Android APK and Simple MFI APK ...
+Run Simple MFI with Organization "sample" and Security Token "some_secret"
+
+
+INSTRUCTIONS
+============
+
+1. Create the local SQLite database. This is the database
+upload_agent.py will update from and synchronize with.
+
+$ sample/create_database.py
+Creating SQLite database...
+sqlite3 DB.sqlite ".read Import.sql"
+Done. Database file is: sample/database/DB.sqlite
+
+2. Start the Store server. This server runs with Google App Engine, so
+the local SDK will be used to start it. You can either provide
+google_appengine in the directory immediately above the manta/
+directory, or you can specify the path with the GOOGLE_APPENGINE_SDK
+environment variable.
+
+$ GOOGLE_APPENGINE_SDK="~/Devel/google_appengine" sample/start_server.py
+Starting local App Engine Manta Store server...
+"/usr/bin/python" "/Users/kgibbs/Devel/google_appengine/dev_appserver.py" --use_sqlite --datastore_path="sample/sample.datastore" "sample/../Store" & 
+INFO     2011-08-05 12:53:39,800 dev_appserver_multiprocess.py:637] Running application jsonsyncstore on port 8080: http://localhost:8080
+
+Done. Server is: localhost:8080
+
+Note that the server will be started in the background, so you may
+want to use an alternate terminal window, as the HTTP server will
+regularly output log lines.
+
+3. Run the Upload Agent. The upload_agent.py script is the heart of
+the Upload portion of Manta. It will run regularly against your local
+SQL database, find any data that has changed, and upload it to the
+Store server. On the first run (i.e. now), it will take a few minutes
+to upload the data to your local App Engine instance (since that
+instance is single threaded).
+
+$ Upload/upload_agent.py --config=sample/config.py
+INFO:root:Starting upload agent run at 2011-08-05T16.07.32
+INFO:root:Executing Client: sqlite3 -header -separator "," sample/database/DB.sqlite ".read sample/uploadagent-data/inprogress/2011-08-05T16.07.32/Client.sql" > sample/uploadagent-data/inprogress/2011-08-05T16.07.32/Client.csv.sqltmp
+...
+INFO:root:Completed upload agent run. Time elapsed: 0:05:42
+
+4. Run the Upload Agent again. Since no changes have been made to the
+database since your last run, nothing should happen.
+
+$ Upload/upload_agent.py --config=sample/config.py
+INFO:root:Starting upload agent run at 2011-08-05T17.08.38
+INFO:root:Executing Client: sqlite3 -header -separator "," sample/database/DB.sqlite ".read sample/uploadagent-data/inprogress/2011-08-05T17.08.38/Client.sql" > sample/uploadagent-data/inprogress/2011-08-05T17.08.38/Client.csv.sqltmp
+...
+INFO:root:Starting upload of http://localhost:8080/sample/Transaction
+WARNING:root:No lines to upload for file Transaction.csv. Upload complete.
+INFO:root:Completed upload agent run. Time elapsed: 0:00:01
+
+5. Install the Manta Sync for Android application on your Android
+emulator or device. You can either compile this yourself from source,
+or use one of the pre-made APKs from the downloads on the github site.
+
+This will install "Sync Utility" on your phone. You don't need to run it yet.
+
+6. Install the Simple MFI application on your Android emulator or
+device. You can either compile this yourself from source, or use one
+of the pre-made APKs from the downloads on the github site.
+
+7. Run the Simple MFI application.
+
+When started, Simple MFI will ask you for an Organization to
+use. Enter "sample".
+
+Sync Utility will then as you for a Security Token to use. By default,
+there is no password, so simply enter any value you'd like. (To enable
+a pasword, set the value in the appengine_config.py file found in the
+Store directory.)
+
+If you are running in the emulator, the Manta Sync Utility will
+automatically notice this, and use the local Store server by
+default. If you are running on a device, you'll need to change the
+hostname to use. Hit the Menu button, select "Preferences", and change
+the sync hostname to "http://10.0.2.2:8080/".
+
+
+MODIFICATIONS
+=============
+
+Now you are done: you have a database, Manta Upload, Store, and
+Sync all running locally, along with the example Simple MFI
+application.
+
+Next, try modifying, deleting, or inserting data into the local SQLite
+database, and run upload_agent.py and sync on the phone again to see
+the results.
+
+$ sqlite3 sample/database/DB.sqlite "update Client set balance = 3000 where clientid = 'AL0635'"
+$ Upload/upload_agent.py --config=sample/config.py
+... run Sync on the phone and check the client's balance ...
+
+Or, you can start working with your own database, and hooking the
+upload_agent.py, a new config.py file, and a simple Android
+application up to it.
+
+
+DATASET
+=======
+
+The dataset itself is based on a sample of Kiva client data from
+Juhudi Kilimo. Various parts of the data (including phone numbers and
+national IDs) have been replaced with random values to ensure privacy.

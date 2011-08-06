@@ -1,0 +1,7 @@
+.DS_Store
+*~
+*.pyc
+scratch/
+uploadagent-data/
+database/DB.sqlite
+sample.datastore

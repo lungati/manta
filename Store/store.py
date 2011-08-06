@@ -20,6 +20,7 @@ FACET_PREFIX = '_facet_'
 _facets = { 
   'app': ['officerid'],
   'app2': ['officerid'],
+  'sample': ['officerid'],
   'juhudi': ['officerid'],
   'juhuditest': ['officerid'],
 }

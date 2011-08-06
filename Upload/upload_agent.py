@@ -3,6 +3,7 @@
 import calendar
 import datetime
 import logging
+import imp
 from optparse import OptionParser
 import os
 import platform
@@ -388,8 +389,13 @@ def SetupLoggingAndFlags():
         raise ValueError('Invalid log level: %s' % loglevel)
     logging.basicConfig(level=numeric_level, filename=options.logfile)
 
-    __import__(options.config)
-    globals()['config'] = sys.modules[options.config].config
+    if '.py' in options.config:
+        module_name = 'config'
+        imp.load_source(module_name, options.config)
+    else:
+        module_name = options.config
+        __import__(options.config)
+    globals()['config'] = sys.modules[module_name].config
 
     globals()['INPROGRESS'] = os.path.join(config['root_dir'], 'inprogress')
     globals()['ARCHIVE'] = os.path.join(config['root_dir'], 'archive')
