@@ -26,4 +26,12 @@ public class SyncPreferenceActivity extends PreferenceActivity {
 		super.onCreate(savedInstanceState);
 		addPreferencesFromResource(R.xml.preferences);
 	}
+	
+	@Override
+	protected void onStop() {
+		super.onStop();
+		
+		// Ensure sync preferences take effect.
+		Util.enableGoogleAccountsForSync(this);
+	}
 }

@@ -78,6 +78,8 @@ public class SyncActivity extends ListActivity {
 		}
 		mURI = getIntent().getData();
 		
+		Util.enableGoogleAccountsForSync(this);
+		
 		String initialPathPrefix = "";
 		List<String> path = mURI.getPathSegments();
 		if (path.size() == 2) {

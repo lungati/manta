@@ -36,9 +36,13 @@ import android.accounts.AuthenticatorException;
 import android.accounts.OperationCanceledException;
 import android.content.ContentResolver;
 import android.content.Context;
+import android.content.PeriodicSync;
+import android.content.SharedPreferences;
 import android.database.Cursor;
 import android.net.Uri;
 import android.os.AsyncTask;
+import android.os.Bundle;
+import android.preference.PreferenceManager;
 import android.text.TextUtils;
 import android.text.TextUtils.StringSplitter;
 import android.util.Log;
@@ -92,6 +96,17 @@ public class Util {
 							e.printStackTrace();
 						}
 
+
+				        // If we don't have the desired settings, this is being called from a client application. 
+				        // It's tough to access preferences from those apps, so just skip it for now-- we'll 
+				        // capture them when running the actual sync provider.
+				        boolean settingsPresent = context.getPackageName().startsWith("org.mantasync");
+				        int syncFrequency = -1;
+				        if (settingsPresent) {
+					        SharedPreferences settings = PreferenceManager.getDefaultSharedPreferences(context);
+							syncFrequency = Integer.parseInt(settings.getString(SyncAdapter.SYNC_FREQUENCY_PREF, 
+									String.valueOf(SyncAdapter.DEFAULT_SYNC_FREQUENCY)));
+				        }
 						// Notify the sync system about account syncability.
 						for (int i = 0; i < allGoogleAccounts.length; i++) {
 							boolean syncable = false;
@@ -105,8 +120,37 @@ public class Util {
 									+ allGoogleAccounts[i].toString());
 							ContentResolver.setIsSyncable(allGoogleAccounts[i],
 									Store.AUTHORITY, syncable ? 1 : 0);
-							ContentResolver.setSyncAutomatically(allGoogleAccounts[i],
-									Store.AUTHORITY, syncable);			
+							
+							// Remove the annoying built-in daily sync, as our settings supersede this.
+							ContentResolver.removePeriodicSync(allGoogleAccounts[i],
+									Store.AUTHORITY, new Bundle());
+							
+							if (settingsPresent) {
+								Bundle bundle = new Bundle();
+								bundle.putBoolean(SyncAdapter.EXTRAS_SYNC_IS_PERIODIC, true);
+			
+								if (syncable && syncFrequency > 0) {
+									ContentResolver.addPeriodicSync(allGoogleAccounts[i],
+											Store.AUTHORITY, bundle, syncFrequency);
+									Log.e(TAG, "allGoogleAccounts[" + i + "] has periodic sync " + syncFrequency + ", " 
+											+ allGoogleAccounts[i].toString());
+									
+									for (PeriodicSync p : ContentResolver.getPeriodicSyncs(allGoogleAccounts[i], Store.AUTHORITY)) {
+										Log.e(TAG, "Periodic syncs: " + p.extras.keySet().toString() + " " + p.period);
+									}
+									
+								} else {
+									ContentResolver.removePeriodicSync(allGoogleAccounts[i],
+											Store.AUTHORITY, bundle);
+									Log.e(TAG, "allGoogleAccounts[" + i + "] has no periodic sync, " 
+											+ allGoogleAccounts[i].toString());
+								}
+								ContentResolver.setSyncAutomatically(allGoogleAccounts[i],
+										Store.AUTHORITY, syncable);
+								Log.e(TAG, "allGoogleAccounts[" + i + "] has automatic sync " + 
+										syncable + ", " 
+										+ allGoogleAccounts[i].toString());
+							}
 						}
 					}
 				}, null);

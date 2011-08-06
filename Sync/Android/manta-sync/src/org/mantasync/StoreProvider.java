@@ -320,7 +320,24 @@ public class StoreProvider extends ContentProvider {
 			return object;
         }
         
-        public void insertAllFromJson(SQLiteDatabase db, String app, String kind, JsonParser jp, int count, Uri metaUpdateUri, Mode mode) {
+        class InsertData {
+        	SQLiteDatabase mDB;
+        	String mKind;
+        	InsertHelper mHelper = null;
+        	InsertData(SQLiteDatabase db, String kind) {
+        		mDB = db;
+        		mKind = kind;
+        		resetHelper();
+        	}
+        	public void resetHelper() {
+        		if (mHelper != null) {
+        			mHelper.close();
+        		}
+        		mHelper = new InsertHelper(mDB, mKind);
+        	}
+        };
+        
+        public void insertAllFromJson(SQLiteDatabase db, Uri dataUri, String app, String kind, JsonParser jp, int count, Uri metaUpdateUri, Mode mode) {
             String kindQuoted = "'" + kind + "'";
         	ContentValues values = new ContentValues();
         	
@@ -332,7 +349,8 @@ public class StoreProvider extends ContentProvider {
             List<String> cols = getTableColumnMap(db).get(kind);
             if (cols != null && cols.contains(Base.KEY) && cols.contains(Base.REV)) {
 	    		// Find all existing entities. Eliminate entities that we do not need to consider (no change).
-				Cursor cur = db.query(kindQuoted, new String[] { Base.KEY, Base.REV, "rowid" }, null, null, null, null, null);
+            	String where = mProvider.extractWhereFromUri(cols, dataUri);
+				Cursor cur = db.query(kindQuoted, new String[] { Base.KEY, Base.REV, "rowid" }, where, null, null, null, null);
 				cur.moveToFirst();
 				while (!cur.isAfterLast()) {
 					presentRevs.put(cur.getString(0), new Pair<String, Integer>(cur.getString(1), cur.getInt(2)));
@@ -347,7 +365,7 @@ public class StoreProvider extends ContentProvider {
             mProvider.update(metaUpdateUri, values, null, null);
     		
             // TODO Use app here also.
-        	InsertHelper helper = new InsertHelper(db, kindQuoted);
+            InsertData data = new InsertData(db, kindQuoted);
             
     		// Then, start a transaction to do the actual updates.
             int writes = 0;
@@ -387,7 +405,7 @@ public class StoreProvider extends ContentProvider {
 	                    	entitiesLeft = false;
 	                    	break;
 	                    }
-						if (insertFromJson(db, app, kind, object, mode, presentRevs, helper)) {
+						if (insertFromJson(db, app, kind, object, mode, presentRevs, data)) {
 							writes++;
 							long now = System.currentTimeMillis();
 							long elapsed = now - lastTime;
@@ -401,7 +419,11 @@ public class StoreProvider extends ContentProvider {
 	        		}
 
 					values.clear();
-		    		values.put(Meta_Table.PROGRESS_PERCENT, (int)((writes / (float)count) * 100));
+					int progressPercent = (int)((writes / (float)count) * 100);
+					if (count == -1) {
+						progressPercent = -1;
+					}
+		    		values.put(Meta_Table.PROGRESS_PERCENT, progressPercent);
 		    		values.put(Meta_Table.STATUS, "Inserting " + writes + "/" + count + ", " + String.format("%.1f", lastRate) + " writes/sec");
 		            mProvider.update(metaUpdateUri, values, null, null);
 		            
@@ -411,7 +433,7 @@ public class StoreProvider extends ContentProvider {
 	        		Log.i(TAG, "Wrote " + (writes - writesTxStart) + " in last transaction");
 	        	}
             }
-    		helper.close();
+    		data.mHelper.close();
         }
 
         @SuppressWarnings("unused")
@@ -428,7 +450,7 @@ public class StoreProvider extends ContentProvider {
         }
         
         public boolean insertFromJson(SQLiteDatabase db, String app, String kind, Map<String,Object> json, Mode mode, 
-        		Map<String, Pair<String, Integer>> presentRevs, InsertHelper helper) {
+        		Map<String, Pair<String, Integer>> presentRevs, InsertData data) {
         	// TODO Handle deletion
         	
         	String kindQuoted = "\"" + kind + "\"";
@@ -451,12 +473,22 @@ public class StoreProvider extends ContentProvider {
         	Iterator<String> iter = json.keySet().iterator();
         	ContentValues values = new ContentValues();
         	boolean allNull = true;
+        	boolean createdNewHelper = false;
         	while (iter.hasNext()) {
         		String name = iter.next();
         		
             	// Ensure needed columns are present
         		if (!columns.contains(name)) {
         			createColumn(db, app, kind, name);
+        		}
+        		if (!createdNewHelper) {
+	        		try { 
+	        			data.mHelper.getColumnIndex(name);
+	        		} catch (IllegalArgumentException e) {
+	        			Log.e(TAG, "Resetting insertion helper, due to new column: " + name);
+	        			data.resetHelper();
+	        			createdNewHelper = true;
+	        		}
         		}
         		
         		Object value = null;
@@ -533,7 +565,7 @@ public class StoreProvider extends ContentProvider {
 	        				// No existing entity, insert without a new query.
 	        				// TODO I don't know if this code can handle introduction of a new column after 
 	        				// the helper has been created.
-	        				if (helper.insert(values) == -1) {
+	        				if (data.mHelper.insert(values) == -1) {
 	            				// TODO error occurred
 	            				Log.e(TAG, "Could not insert entity from initial existience "
 	            						+ "query. Falling back on safer method.");	
@@ -638,10 +670,10 @@ public class StoreProvider extends ContentProvider {
         }
     }
     
-    public void updateAllFromJson(String app, String kind, JsonParser jp, int count, Uri updateUri) {
+    public void updateAllFromJson(String app, String kind, Uri dataUri, JsonParser jp, int count, Uri updateUri) {
     	// Get the database and run the query
         SQLiteDatabase db = getOpenHelper(app).getWritableDatabase();
-    	getOpenHelper(app).insertAllFromJson(db, app, kind, jp, count, updateUri, Mode.UPSERT);
+    	getOpenHelper(app).insertAllFromJson(db, dataUri, app, kind, jp, count, updateUri, Mode.UPSERT);
     }
 
     public class UploadData {
@@ -709,6 +741,7 @@ public class StoreProvider extends ContentProvider {
     
     public void finishUploadTransactionForKind(String app, String kind, Uri uri, UploadData upload, boolean error) {
         SQLiteDatabase db = getOpenHelper(app).getWritableDatabase();
+        List<String> columns = getOpenHelper(app).getOrCreateKindTable(db, app, kind);
         
         try {
         	if (!error && upload.count > 0) {
@@ -717,7 +750,7 @@ public class StoreProvider extends ContentProvider {
         		values.put(Base.DIRTY, 0);
         		values.putNull(Base.CHANGES);
         		String where = Base.DIRTY + " = 1";
-        		String queryWhere = extractWhereFromUri(uri);
+        		String queryWhere = extractWhereFromUri(columns, uri);
         		if (queryWhere.length() > 0) {
         			where = "(" + queryWhere + ") AND " + where;
         		}
@@ -835,22 +868,28 @@ public class StoreProvider extends ContentProvider {
 		return newCursor;
 	}
 	
-	static public String extractWhereFromUri(Uri uri) {
+	public String extractWhereFromUri(List<String> columns, Uri uri) {
 		String where = "";
 		if (uri.getEncodedQuery() != null && uri.getEncodedQuery().length() > 0) {
 			Map<String, String> query = Util.getQueryComponents(uri);
 			for (Entry<String, String> s : query.entrySet()) {
+				String whereSegment;
+				if (columns.contains(s.getKey())) {
+					whereSegment = s.getKey() + "= \"" + s.getValue() + "\"";
+				} else {
+					whereSegment = "0";
+				}
 				if (where.length() > 0) {
 					where += " AND ";
 				}
-				where += s.getKey() + "= \"" + s.getValue() + "\"";
+				where += whereSegment;
 			}
 		}
 		return where;
 	}
 	
-	static public void extractWhereFromUri(SQLiteQueryBuilder qb, Uri uri) {
-		String where = extractWhereFromUri(uri);
+	public void extractWhereFromUri(SQLiteQueryBuilder qb, List<String> columns, Uri uri) {
+		String where = extractWhereFromUri(columns, uri);
 		if (where.length() > 0) {
 			qb.appendWhere(where);
 		}
@@ -896,11 +935,14 @@ public class StoreProvider extends ContentProvider {
         SQLiteDatabase writableDb = getOpenHelper(app).getWritableDatabase();
         SQLiteQueryBuilder qb = new SQLiteQueryBuilder();
         // Check tables for existence
+    	List<String> allColumns = new ArrayList<String>();
         if (writableDb != null) {
         	List<String> columns = getOpenHelper(app).getOrCreateKindTable(writableDb, app, kind);
+        	allColumns.addAll(columns);
         	List<String> joinColumns = null;
         	if (joinKind != null) {
             	joinColumns = getOpenHelper(app).getOrCreateKindTable(writableDb, app, joinKind);
+            	allColumns.addAll(joinColumns);
         	}
         	if (projection != null) {
 		        for (int i = 0; i < projection.length; ++i) {
@@ -916,7 +958,7 @@ public class StoreProvider extends ContentProvider {
         qb.setTables(quotedKind);
 
         // Extract any select arguments from the query param.
-		extractWhereFromUri(qb, uri);
+		extractWhereFromUri(qb, allColumns, uri);
         
         switch (sUriMatcher.match(uri)) {
         case ITEM_LIST:
@@ -1187,6 +1229,7 @@ public class StoreProvider extends ContentProvider {
 	        	getOpenHelper(app).createColumn(db, app, kind, iter.next().getKey());
 	        }
         }
+        List<String> columns = getOpenHelper(app).getOrCreateKindTable(db, app, kind);
         
         // TODO Plan for update:
         // Produce JSON version of values
@@ -1206,7 +1249,7 @@ public class StoreProvider extends ContentProvider {
         }
         whereSuffix += (!TextUtils.isEmpty(where) ? "AND (" + where + ") " : "");
         
-        String queryWhere = extractWhereFromUri(uri);
+        String queryWhere = extractWhereFromUri(columns, uri);
         whereSuffix += (!TextUtils.isEmpty(queryWhere) ? "AND (" + queryWhere + ") " : "");
         
         String changed = null;

@@ -24,10 +24,29 @@
                 android:title="Sync Hostname"
                 android:key="hostname" />
         <EditTextPreference
-                android:name="Auth Token"
-                android:summary="Auth token to use with the synchronization server."
+                android:name="Security Token"
+                android:summary="Security token (password) to use with the synchronization server."
                 android:defaultValue=""
                 android:title="Auth Token"
                 android:key="auth_token" />
+        </PreferenceCategory>
+        <PreferenceCategory
+                android:title="Sync">
+                <CheckBoxPreference
+                android:name="Sync Automatically"
+                android:summary="Automatically sync when network activity is detected."
+                android:defaultValue=""
+                android:title="Sync Automatically"
+                android:key="sync_automatically" />
+                
+                <ListPreference
+                android:name="Frequency"
+                android:summary="How often to periodically sync."
+                android:defaultValue=""
+                android:title="Frequency"
+                android:key="sync_frequency" 
+                android:entries="@array/pref_sync_frequency_names"
+                android:entryValues="@array/pref_sync_frequency_values"            
+                />
         </PreferenceCategory>
 </PreferenceScreen>
