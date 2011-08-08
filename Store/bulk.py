@@ -21,4 +21,13 @@ def touch(key):
     app = key.namespace()
     kind = key.kind()
     id = key.id_or_name()
-    store.update_entity(app, kind, id, {}, put_function=yield_put, rebuild_facets=True)
+    
+    ctx = context.get()
+    params = ctx.mapreduce_spec.mapper.params
+    matching_app = params['app_to_process']
+
+    if matching_app and matching_app != app:
+        return
+
+    metadata_entity = store._GetMetadataEntity(app)    
+    store.update_entity(app, kind, id, {}, metadata_entity, put_function=yield_put, rebuild_facets=True)

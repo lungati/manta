@@ -64,7 +64,7 @@ def ImportSplitFile(app, body_file):
 
     return rows
 
-def ImportCSV(app, kind, key_column, body_file):
+def ImportCSV(app, kind, key_column, body_file, metadata_entity):
     error = False
     reader = csv.DictReader(body_file)
 
@@ -115,7 +115,7 @@ def ImportCSV(app, kind, key_column, body_file):
 
         CleanUpFormats(row)
         datastore.RunInTransaction(
-            store.update_entity, app, kind, key, row)
+            store.update_entity, app, kind, key, row, metadata_entity)
         rows = rows + 1
 
     return rows

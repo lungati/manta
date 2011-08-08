@@ -50,7 +50,8 @@ class MainHandler(webapp.RequestHandler):
 
         elif self.request.headers['Content-type'].startswith('text/csv') and id is None:
             key_column = self.request.get('key', None)
-            result = csv_import.ImportCSV(app, kind, key_column, self.request.body_file)
+            result = csv_import.ImportCSV(app, kind, key_column, self.request.body_file,
+                                          metadata_entity)
 
             if result == -1:
                 self.response.set_status(500)

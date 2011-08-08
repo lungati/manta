@@ -137,7 +137,11 @@ def GetMetadataEntity(request):
   if app is '':
     # The id specifies the app we are actually interested in
     app = id
+  if app is None:
+    return None
+  return _GetMetadataEntity(app)
 
+def _GetMetadataEntity(app):
   key = memcache_key('', 'AppMetadata', app)
   data = memcache.get(key)
   if data is not None:
@@ -145,7 +149,8 @@ def GetMetadataEntity(request):
   else:
     entity = get_entity('', 'AppMetadata', app)
     entity_dict = {}
-    entity_dict.update(entity)
+    if entity:
+      entity_dict.update(entity)
     memcache.add(key, entity_dict, 60)
     return entity_dict
 

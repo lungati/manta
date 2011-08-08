@@ -6,3 +6,5 @@ mapreduce:
     params:
     - name: entity_kind
       default: Transaction
+    - name: app_to_process
+      default: 
