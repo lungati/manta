@@ -6,7 +6,6 @@ from google.appengine.ext.webapp import util
 from google.appengine.api import datastore
 from google.appengine.api import datastore_types
 from google.appengine.api import datastore_errors
-from google.appengine.api import lib_config
 import simplejson
 import logging
 import re
@@ -16,33 +15,29 @@ import simplejson as json
 import store
 import csv_import
 
-class _ConfigDefaults(object):
-  def auth_token():
-      return None
-
-_config = lib_config.register('manta_', _ConfigDefaults.__dict__)
-
-def IsAuthTokenValid(request):
-    if _config.auth_token():
-        return request.headers.get('Auth-Token',"") == _config.auth_token()
-    else:
-        return True
-
 class MainHandler(webapp.RequestHandler):
     def post(self):
-        if not IsAuthTokenValid(self.request):
-            self.response.set_status(401)
-            self.response.clear()
-            return
-            
+        metadata_entity = store.GetMetadataEntity(self.request)
+        auth_level = store.GetAuthLevel(self.request, metadata_entity)
         (app, kind, id) = store.extract_path(self.request.path)
+
+        if not store.IsEncryptionSufficient(self.request, metadata_entity):
+          self.response.set_status(403)
+          self.response.clear()
+          return
+        
+        if not store.IsAuthorized(app, kind, id, auth_level, store.WRITE):
+          self.response.set_status(401)
+          self.response.clear()
+          return
+            
         #logging.info("%s, %s, %s" % (app, kind, id))
         data = self.request.body_file.getvalue()
         data_obj = {}
         if (len(data) == 0):
             return
         
-        if (app and kind and id):
+        if (app is not None and kind is not None and id is not None):
             try:
                 data_obj = json.loads(data, use_decimal=True)
             except json.JSONDecodeError:
@@ -51,9 +46,9 @@ class MainHandler(webapp.RequestHandler):
                 return
 
             datastore.RunInTransaction(
-                store.update_entity, app, kind, id, data_obj)
+                store.update_entity, app, kind, id, data_obj, metadata_entity)
 
-        elif self.request.headers['Content-type'].startswith('text/csv') and not id:
+        elif self.request.headers['Content-type'].startswith('text/csv') and id is None:
             key_column = self.request.get('key', None)
             result = csv_import.ImportCSV(app, kind, key_column, self.request.body_file)
 
@@ -65,7 +60,7 @@ class MainHandler(webapp.RequestHandler):
             self.response.out.write(result)
             self.response.out.write("\n")
 
-        elif (app and kind and not id):
+        elif (app is not None and kind is not None and id is None):
             try:
                 data_obj = json.loads(data, use_decimal=True)
             except json.JSONDecodeError:
@@ -85,14 +80,23 @@ class MainHandler(webapp.RequestHandler):
             count = 0
             for data in data_obj:
                 datastore.RunInTransaction(
-                    store.update_entity, app, kind, data['key'], data)
+                    store.update_entity, app, kind, data['key'], data, metadata_entity)
                 count += 1
             
             self.response.out.write(count)
             self.response.out.write("\n")
 
     def get(self):
-        if not IsAuthTokenValid(self.request):
+        metadata_entity = store.GetMetadataEntity(self.request)
+        auth_level = store.GetAuthLevel(self.request, metadata_entity)
+        (app, kind, id) = store.extract_path(self.request.path)
+      
+        if not store.IsEncryptionSufficient(self.request, metadata_entity):
+          self.response.set_status(403)
+          self.response.clear()
+          return
+
+        if not store.IsAuthorized(app, kind, id, auth_level, store.READ):
             self.response.set_status(401)
             self.response.clear()
             return
@@ -100,10 +104,9 @@ class MainHandler(webapp.RequestHandler):
         self.response.headers["Access-Control-Allow-Origin"] = "*"
         self.response.headers["Access-Control-Allow-Headers"] = "Auth-Token"
 
-        (app, kind, id) = store.extract_path(self.request.path)
         #logging.info("%s, %s, %s" % (app, kind, id))
         entity = None
-        if (app and kind and id):
+        if (app is not None and kind is not None and id is not None):
             entity = store.get_entity(app, kind, id)
             if entity:
               self.response.out.write(store.output_entity_json(entity))
@@ -113,8 +116,8 @@ class MainHandler(webapp.RequestHandler):
               self.response.set_status(404)
               self.response.clear()
               return
-        elif (app and kind):
-            results = store.get_entities(app, kind, self.request.params)
+        elif (app is not None and kind is not None):
+            results = store.get_entities(app, kind, metadata_entity, self.request.params) 
             self.response.out.write("[\n")
             first = True
             count = 0

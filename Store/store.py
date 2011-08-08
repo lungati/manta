@@ -5,6 +5,10 @@ from google.appengine.ext.webapp import util
 from google.appengine.api import datastore
 from google.appengine.api import datastore_types
 from google.appengine.api import datastore_errors
+from google.appengine.api import lib_config
+from google.appengine.api import memcache
+from google.appengine.api import users
+from google.appengine.api import oauth
 import simplejson
 import logging
 import re
@@ -13,20 +17,35 @@ import datetime
 import simplejson as json
 import iso8601
 
+class _ConfigDefaults(object):
+  def auth_token():
+      return None
+  def superuser_auth_token():
+      return None
+
+_config = lib_config.register('manta_', _ConfigDefaults.__dict__)
+
+APP_METADATA = "AppMetadata"
+SPECIAL_KINDS = [ APP_METADATA ]
+
 FACET_PREFIX = '_facet_'
 
-# TODO Replace this with a real facets implementation, which uses a
-# metadata entity that defines the app, and memcache for speed.
-_facets = { 
+_builtin_facets = { 
   'app': ['officerid'],
   'app2': ['officerid'],
   'sample': ['officerid'],
   'juhudi': ['officerid'],
   'juhuditest': ['officerid'],
 }
-def GetFacetsForApp(app):
-  if app in _facets:
-    return _facets[app]
+def GetFacetsForApp(app, metadata_entity):
+  if metadata_entity:
+    if 'facets' in metadata_entity:
+      facets = metadata_entity['facets']
+      if facets and isinstance(facets, list):
+        return facets
+    return []
+  if app in _builtin_facets:
+    return _builtin_facets[app]
   return []
 def is_facet_property(p):
   return p.startswith(FACET_PREFIX)
@@ -50,9 +69,163 @@ def extract_path(path):
   id = None
   if len(parts) > 3:
     id = parts[3]
+    
+  if id is None and app in SPECIAL_KINDS:
+    id = kind
+    kind = app
+    app = ''
   return (app, kind, id)
 
-def update_entity(app, kind, id, data, put_function=None, rebuild_facets=False):
+def memcache_key(app, kind, id):
+  return "entity:" + (app or '') + '/' + (kind or '') + '/' + (id or '')
+
+READ = "READ"
+WRITE = "WRITE"
+OWNER = "OWNER"
+AUTH_LEVELS = [ None, READ, WRITE, OWNER ]
+
+def GetCurrentUser():
+  user = None
+  try:
+    user = oauth.get_current_user()
+  except:
+    user = users.get_current_user()
+  return user
+
+def AuthTokenValid(entity, key, user_value):
+  if not key in entity:
+    return False
+  stored_value = entity[key]
+  if stored_value == None:
+    return False
+  if stored_value == '*':
+    return True
+  if stored_value == user_value:
+    return True
+  return False
+
+def UserValid(entity, key, user_value):
+  if user_value is None:
+    return False
+  if not key in entity:
+    return False
+  email = user_value.email()
+  stored_value = entity[key]
+  if stored_value == None:
+    return False
+  if not isinstance(stored_value, list):
+    return False
+  if '*' in stored_value:
+    return True
+  if email in stored_value:
+    return True
+  return False
+
+def IncreaseAuth(auth_level, value):
+  if not value in AUTH_LEVELS:
+    return auth_level
+  if AUTH_LEVELS.index(value) > AUTH_LEVELS.index(auth_level):
+    return value
+  return auth_level
+
+def GetMetadataEntity(request):
+  # Get AppMetadata
+  # Try memcache
+  # If not present, get entity
+  #   Add to memcache 1m expiry if found
+  (app, kind, id) = extract_path(request.path)
+  if app is '':
+    # The id specifies the app we are actually interested in
+    app = id
+
+  key = memcache_key('', 'AppMetadata', app)
+  data = memcache.get(key)
+  if data is not None:
+    return data
+  else:
+    entity = get_entity('', 'AppMetadata', app)
+    entity_dict = {}
+    entity_dict.update(entity)
+    memcache.add(key, entity_dict, 60)
+    return entity_dict
+
+def GetAuthLevel(request, metadata_entity):
+  # If metadata not present, check default auth from appengine_config
+  #   return OWNER or None
+  #
+  # Get auth-token header
+  # Determine highest level of auth provided from auth-token
+  #
+  # Get current user
+  # Determine highest level of auth provided from user
+  # 
+  # Return auth level
+
+  auth_token = request.headers.get('Auth-Token',"")
+  
+  # If present, the superuser_auth_token() allows override of all
+  # priveleges.
+  if _config.superuser_auth_token():
+    if auth_token == _config.superuser_auth_token():
+      return OWNER
+
+  # Otherwise, the appengine_config.auth_token() provides only a
+  # default level of access.
+  if not metadata_entity:
+    if _config.auth_token():
+        if auth_token == _config.auth_token():
+          return OWNER
+        else:
+          return None
+    else:
+        return OWNER
+
+  auth_level = None
+
+  if AuthTokenValid(metadata_entity, 'read_auth_token', auth_token):
+    auth_level = IncreaseAuth(auth_level, READ)
+  if AuthTokenValid(metadata_entity, 'write_auth_token', auth_token):
+    auth_level = IncreaseAuth(auth_level, WRITE)
+  if AuthTokenValid(metadata_entity, 'owner_auth_token', auth_token):
+    auth_level = IncreaseAuth(auth_level, OWNER)
+
+  user = GetCurrentUser()
+    
+  if UserValid(metadata_entity, 'read_users', user):
+    auth_level = IncreaseAuth(auth_level, READ)
+  if UserValid(metadata_entity, 'write_users', user):
+    auth_level = IncreaseAuth(auth_level, WRITE)
+  if UserValid(metadata_entity, 'owner_users', user):
+    auth_level = IncreaseAuth(auth_level, OWNER)
+
+  return auth_level
+
+def IsAuthorized(app, kind, id, request_auth_level, minimum_auth_level):
+  if app is '':
+    # Disallow any kinds not specifically allowed
+    if not kind in SPECIAL_KINDS:
+      return False
+    # Disallow any directory requests for Metadata
+    if id is None:
+      return False
+    return request_auth_level == OWNER
+
+  if not request_auth_level in AUTH_LEVELS:
+    return False
+  if not minimum_auth_level in AUTH_LEVELS:
+    return False
+  return AUTH_LEVELS.index(request_auth_level) >= AUTH_LEVELS.index(minimum_auth_level)
+
+def IsEncryptionSufficient(request, metadata_entity):
+  if not metadata_entity:
+    return True
+  if request.scheme == 'https':
+    return True
+  if 'https_required' in metadata_entity:
+    return not metadata_entity['https_required']
+  return True
+
+def update_entity(app, kind, id, data, metadata_entity, put_function=None, rebuild_facets=False):
     # Start transaction
     # Get entity
     # Apply changes to entity
@@ -107,7 +280,7 @@ def update_entity(app, kind, id, data, put_function=None, rebuild_facets=False):
 
     current_facets = {}
     new_facets = {}
-    facets = GetFacetsForApp(app)
+    facets = GetFacetsForApp(app, metadata_entity)
 
     for p in entity.keys():
       if is_facet_property(p):
@@ -162,6 +335,7 @@ def update_entity(app, kind, id, data, put_function=None, rebuild_facets=False):
       put_function(entity)
     else:
       datastore.Put(entity)
+    memcache.delete(memcache_key(app, kind, id))
     if changed:
       change = Revision(
         key=datastore.Key.from_path("Revision", rev, 
@@ -187,9 +361,9 @@ def get_entity(app, kind, id):
 
 _UNPARSED_SENTINEL = {}
 
-def get_entities(app, kind, params=None):
+def get_entities(app, kind, metadata_entity, params=None):
     query = datastore.Query(kind=kind, namespace=app)
-    facets = GetFacetsForApp(app)
+    facets = GetFacetsForApp(app, metadata_entity)
     if params:
       for param in params:
         if param == 'date_start':
