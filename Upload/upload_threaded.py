@@ -22,6 +22,7 @@ CHUNK_SIZE = 30
 NUM_THREADS = 15
 NUM_RETRIES = 10
 AUTH_TOKEN = ""
+ACCOUNT_NAME = "UploadAgent"
 TIMEOUT = 15
 MAX_IDLE_SECONDS = 60
 
@@ -124,6 +125,7 @@ class WorkerThread(threading.Thread):
             req = urllib2.Request(url=self.url, data=self.bundle.header + "".join(l))
             req.add_header('Content-type', 'text/csv')
             req.add_header('Auth-Token', AUTH_TOKEN)
+            req.add_header('X-Account-Name', ACCOUNT_NAME)
             success = False
             for i in xrange(NUM_RETRIES):
                 try:
@@ -176,8 +178,12 @@ def RefreshSettings():
     except ImportError:
         config = None
     if config:
-        globals()['NUM_THREADS'] = config['upload']['num_threads']
-        globals()['AUTH_TOKEN'] = config['upload']['auth_token']
+        if 'auth_token' in config['upload']:
+            globals()['AUTH_TOKEN'] = config['upload']['auth_token']
+        if 'num_threads' in config['upload']:
+            globals()['NUM_THREADS'] = config['upload']['num_threads']
+        if 'account_name' in config['upload']:
+            globals()['ACCOUNT_NAME'] = config['upload']['account_name']
 
 def upload_file(url, filename):
     RefreshSettings()
