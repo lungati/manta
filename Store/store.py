@@ -26,6 +26,7 @@ class _ConfigDefaults(object):
 
 _config = lib_config.register('manta_', _ConfigDefaults.__dict__)
 
+APP_RE = '^[0-9A-Za-z._-]{0,100}$'
 APP_METADATA = "AppMetadata"
 SPECIAL_KINDS = [ APP_METADATA ]
 
@@ -72,10 +73,20 @@ def extract_path(path):
   if len(parts) > 3:
     id = parts[3]
     
+  if app and not re.match(APP_RE, app):
+    app = None
+    kind = None
+    id = None
+
   if id is None and app in SPECIAL_KINDS:
     id = kind
     kind = app
     app = ''
+    if id:
+      id = id.lower()
+  else:
+    if app:
+      app = app.lower()
   return (app, kind, id)
 
 def memcache_key(app, kind, id):
