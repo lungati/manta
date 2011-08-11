@@ -30,4 +30,4 @@ def touch(key):
         return
 
     metadata_entity = store._GetMetadataEntity(app)    
-    store.update_entity(app, kind, id, {}, metadata_entity, put_function=yield_put, rebuild_facets=True)
+    store.update_entity(app, kind, id, {}, metadata_entity, None, put_function=yield_put, rebuild_facets=True)

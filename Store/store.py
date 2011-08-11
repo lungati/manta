@@ -9,6 +9,7 @@ from google.appengine.api import lib_config
 from google.appengine.api import memcache
 from google.appengine.api import users
 from google.appengine.api import oauth
+import os
 import simplejson
 import logging
 import re
@@ -58,6 +59,7 @@ class Revision(db.Model):
   data = db.TextProperty(required=True, indexed=False)
   date = db.DateTimeProperty(required=True)
   rev = db.StringProperty(required=True)
+  user = db.StringProperty(required=False)
 
 def extract_path(path):
   parts = re.split('/', path, 4)
@@ -90,6 +92,11 @@ def GetCurrentUser():
     user = oauth.get_current_user()
   except:
     user = users.get_current_user()
+
+  # Hack: OAuth API always returns an example user in the SDK.
+  if os.environ.get('SERVER_SOFTWARE','').startswith('Devel'):
+    user = users.get_current_user()
+
   return user
 
 def AuthTokenValid(entity, key, user_value):
@@ -147,7 +154,7 @@ def _GetMetadataEntity(app):
   if data is not None:
     return data
   else:
-    entity = get_entity('', 'AppMetadata', app)
+    (entity, revision_list) = get_entity('', 'AppMetadata', app)
     entity_dict = {}
     if entity:
       entity_dict.update(entity)
@@ -230,7 +237,14 @@ def IsEncryptionSufficient(request, metadata_entity):
     return not metadata_entity['https_required']
   return True
 
-def update_entity(app, kind, id, data, metadata_entity, put_function=None, rebuild_facets=False):
+def GetUser(request):
+  user = GetCurrentUser()
+  if user:
+    return user.email()
+
+  return request.headers.get('X-Account-Name', None)
+
+def update_entity(app, kind, id, data, metadata_entity, user, put_function=None, rebuild_facets=False):
     # Start transaction
     # Get entity
     # Apply changes to entity
@@ -349,20 +363,32 @@ def update_entity(app, kind, id, data, metadata_entity, put_function=None, rebui
         parent_id = entity.key().id_or_name(),
         data = json.dumps(data, use_decimal=True),
         rev = rev,
-        date = date)
+        date = date,
+        user = user)
       if put_function:
         put_function(change)
       else:
         change.put()
 
-def get_entity(app, kind, id):
+def get_entity(app, kind, id, include_revisions=False):
     key = datastore.Key.from_path(kind, id, namespace=app)
     entity = None
+    revision_list = []
     try:
         entity = datastore.Get(key)
+        
+        if include_revisions:
+          query = datastore.Query(namespace=app)
+          query.Ancestor(key)
+          for r in query.Run():
+            #logging.info(r.kind() + " " + r.key().name())
+            if (r.kind() != "Revision"):
+              continue
+            assert(r.kind() == "Revision")
+            revision_list.append(r)
     except datastore_errors.EntityNotFoundError:
         pass
-    return entity
+    return (entity, revision_list)
 
 _UNPARSED_SENTINEL = {}
 
@@ -391,18 +417,23 @@ def get_entities(app, kind, metadata_entity, params=None):
           query[property_name + ' ='] = value_native
     return query.Run()
 
-def output_entity(entity):
+def output_entity(entity, revision_list=[]):
     base = {"key": entity.key().id_or_name(),
             "type":entity.kind()}
     output = dict(entity).copy()
     for p in output.keys():
       if is_facet_property(p):
         del output[p]
+    flat_revisions = []
+    for r in revision_list:
+      flat_revisions.append(output_entity(r))
+    if flat_revisions:
+      output['revisions'] = flat_revisions
     output.update(base)
     return output
 
-def output_entity_json(entity):
-    obj = output_entity(entity)
+def output_entity_json(entity, revision_list=[]):
+    obj = output_entity(entity, revision_list)
     return json.dumps(obj, default=encode_datetime, use_decimal=True)
 
 def encode_datetime(obj):

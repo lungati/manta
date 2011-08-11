@@ -30,6 +30,8 @@ class MainHandler(webapp.RequestHandler):
           self.response.set_status(401)
           self.response.clear()
           return
+
+        user = store.GetUser(self.request)
             
         #logging.info("%s, %s, %s" % (app, kind, id))
         data = self.request.body_file.getvalue()
@@ -46,12 +48,12 @@ class MainHandler(webapp.RequestHandler):
                 return
 
             datastore.RunInTransaction(
-                store.update_entity, app, kind, id, data_obj, metadata_entity)
+                store.update_entity, app, kind, id, data_obj, metadata_entity, user)
 
         elif self.request.headers['Content-type'].startswith('text/csv') and id is None:
             key_column = self.request.get('key', None)
             result = csv_import.ImportCSV(app, kind, key_column, self.request.body_file,
-                                          metadata_entity)
+                                          metadata_entity, user)
 
             if result == -1:
                 self.response.set_status(500)
@@ -81,7 +83,7 @@ class MainHandler(webapp.RequestHandler):
             count = 0
             for data in data_obj:
                 datastore.RunInTransaction(
-                    store.update_entity, app, kind, data['key'], data, metadata_entity)
+                    store.update_entity, app, kind, data['key'], data, metadata_entity, user)
                 count += 1
             
             self.response.out.write(count)
@@ -108,9 +110,10 @@ class MainHandler(webapp.RequestHandler):
         #logging.info("%s, %s, %s" % (app, kind, id))
         entity = None
         if (app is not None and kind is not None and id is not None):
-            entity = store.get_entity(app, kind, id)
+            include_revisions = self.request.params.get('rev') == '*'
+            (entity, revision_list) = store.get_entity(app, kind, id, include_revisions)
             if entity:
-              self.response.out.write(store.output_entity_json(entity))
+              self.response.out.write(store.output_entity_json(entity, revision_list))
               self.response.out.write("\n")
               self.response.headers["X-Num-Results"] = str(1)
             else:
