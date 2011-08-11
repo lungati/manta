@@ -16,8 +16,6 @@
 package org.mantasync;
 
 import java.util.List;
-
-
 import org.mantasync.R;
 import org.mantasync.Store.Meta_Table;
 
@@ -61,6 +59,7 @@ public class SyncActivity extends ListActivity {
     // Dialog item ids
     public static final int DIALOG_GET_PASSWORD = 0;
     public static final int DIALOG_NO_ACCOUNT = 1;
+    public static final int DIALOG_PICK_ACCOUNT = 2;
     
     ContentObserver mContentObserver;
     Button mDone;
@@ -77,7 +76,7 @@ public class SyncActivity extends ListActivity {
 			getIntent().setData(Store.Meta_Table.CONTENT_URI);
 		}
 		mURI = getIntent().getData();
-		
+
 		Util.enableGoogleAccountsForSync(this);
 		
 		String initialPathPrefix = "";
@@ -189,27 +188,48 @@ public class SyncActivity extends ListActivity {
 	
 	protected void startSync() {
 		SharedPreferences settings = PreferenceManager.getDefaultSharedPreferences(this);
-        
-        if (settings.getString(SyncAdapter.AUTH_TOKEN_PREF, "").length() == 0) {
-        	showDialog(DIALOG_GET_PASSWORD);
-        	return;
-        }
 
+        String prefsAccount = settings.getString(SyncAdapter.ACCOUNT_PREF, "");
+        
 		Bundle bundle = new Bundle();
 		bundle.putBoolean(ContentResolver.SYNC_EXTRAS_MANUAL, true);
 		bundle.putBoolean(ContentResolver.SYNC_EXTRAS_IGNORE_SETTINGS, true);
 		Account[] accounts = Util.getAccounts(this);
+		String accountNames[] = new String[accounts.length];
+		boolean accountFound = false;
 		for (Account account : accounts) {
-			if (!ContentResolver.isSyncActive(account, Store.AUTHORITY) && 
-					!ContentResolver.isSyncPending(account, Store.AUTHORITY)) {
-				Log.e(TAG, account.name + " CLAIMS to need sync, because one does not seem pending nor active");
+			if (account.name.equals(prefsAccount)) {
+				if (!ContentResolver.isSyncActive(account, Store.AUTHORITY) && 
+						!ContentResolver.isSyncPending(account, Store.AUTHORITY)) {
+					Log.e(TAG, account.name + " CLAIMS to need sync, because one does not seem pending nor active");
+				}
+				Log.e(TAG, "Requesting sync for : " + account.name);
+				ContentResolver.requestSync(account, Store.AUTHORITY, bundle);
+				accountFound = true;
 			}
-			Log.e(TAG, "Requesting sync for : " + account.name);
-			ContentResolver.requestSync(account, Store.AUTHORITY, bundle);
 		}
+	
 		if (accounts.length == 0) {
 			showDialog(DIALOG_NO_ACCOUNT);
+			return;
 		}
+		
+		if (!accountFound) {
+			for (int i = 0; i < accounts.length; ++i) {
+				accountNames[i] = accounts[i].name;
+			}
+			Bundle dialogBundle = new Bundle();
+			dialogBundle.putStringArray("accountNames", accountNames);
+	
+			showDialog(DIALOG_PICK_ACCOUNT, dialogBundle);
+			return;
+		}
+//		  // Require a auth token (password). Could make this a 2 part dialog (ask if needed, then ask)
+//        if (settings.getString(SyncAdapter.AUTH_TOKEN_PREF, "").length() == 0) {
+//        	showDialog(DIALOG_GET_PASSWORD);
+//        	return;
+//        }
+		
 	}
 	
 	@Override
@@ -309,6 +329,28 @@ public class SyncActivity extends ListActivity {
     		Dialog alert = builder.create();
     		return alert;
     	}
+    	
+    	case DIALOG_PICK_ACCOUNT:
+		{
+			final String[] items = args.getStringArray("accountNames");
+			
+			AlertDialog.Builder builder = new AlertDialog.Builder(this);
+			builder.setTitle("Pick an account");
+			builder.setItems(items, new DialogInterface.OnClickListener() {
+				public void onClick(DialogInterface dialog, int item) {
+    	    		SharedPreferences settings = PreferenceManager.getDefaultSharedPreferences(SyncActivity.this);
+    	            SharedPreferences.Editor editor = settings.edit();
+    	    		editor.putString(SyncAdapter.ACCOUNT_PREF, items[item]);
+    	            editor.commit();
+    	            dialog.dismiss();
+    	    		Util.enableGoogleAccountsForSync(SyncActivity.this);
+    	            startSync();
+				}
+			});
+			AlertDialog alert = builder.create();
+			return alert;
+		}
+    	
     	}
     	
     	return super.onCreateDialog(id, args);

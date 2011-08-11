@@ -35,6 +35,7 @@ import android.accounts.AccountManagerFuture;
 import android.accounts.AuthenticatorException;
 import android.accounts.OperationCanceledException;
 import android.content.ContentResolver;
+import android.content.ContentValues;
 import android.content.Context;
 import android.content.PeriodicSync;
 import android.content.SharedPreferences;
@@ -102,10 +103,12 @@ public class Util {
 				        // capture them when running the actual sync provider.
 				        boolean settingsPresent = context.getPackageName().startsWith("org.mantasync");
 				        int syncFrequency = -1;
+				        String prefsAccount = "";
 				        if (settingsPresent) {
 					        SharedPreferences settings = PreferenceManager.getDefaultSharedPreferences(context);
 							syncFrequency = Integer.parseInt(settings.getString(SyncAdapter.SYNC_FREQUENCY_PREF, 
 									String.valueOf(SyncAdapter.DEFAULT_SYNC_FREQUENCY)));
+							prefsAccount = settings.getString(SyncAdapter.ACCOUNT_PREF, "");
 				        }
 						// Notify the sync system about account syncability.
 						for (int i = 0; i < allGoogleAccounts.length; i++) {
@@ -116,6 +119,11 @@ public class Util {
 									break;
 								}
 							}
+							if (!prefsAccount.equals(allGoogleAccounts[i].name)) {
+								Log.e(TAG, "allGoogleAccounts[" + i + "] (" + allGoogleAccounts[i].name + ") != " + prefsAccount);
+								continue;
+							}
+							
 							Log.e(TAG, "allGoogleAccounts[" + i + "] is " + syncable + ", " 
 									+ allGoogleAccounts[i].toString());
 							ContentResolver.setIsSyncable(allGoogleAccounts[i],
@@ -156,6 +164,24 @@ public class Util {
 				}, null);
 	}
 
+	static public void clearSyncedStatus(Uri uri, ContentResolver resolver) {
+        Cursor c = resolver.query(uri, null, null, null, null);
+        c.moveToFirst();
+        ContentValues values = new ContentValues();
+        values.put(Meta_Table.LAST_SYNCED, 0);
+        while (!c.isAfterLast()) {
+        	String pathQuery = c.getString(c.getColumnIndex(Meta_Table.PATH_QUERY));
+        	if (c.getLong(c.getColumnIndex(Meta_Table.LAST_SYNCED)) != 0) {
+        		Uri itemUri = Uri.parse(Meta_Table.CONTENT_URI + pathQuery);
+        		if (resolver.update(itemUri, values, null, null) != 1) {
+        			Log.e(TAG, "ERROR: Could not update synced status for: " + itemUri);
+        		}
+        	}
+        	c.moveToNext();
+        }
+        c.close();
+	}
+	
 	static public boolean neededTablesArePresent(Uri uri, ContentResolver resolver) {
 		boolean syncRequired = false;
 		Set<String> tablesWithoutData = new HashSet<String>();

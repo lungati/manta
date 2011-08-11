@@ -16,20 +16,24 @@
 package org.mantasync;
 
 import java.io.BufferedReader;
-import java.io.BufferedWriter;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.InputStreamReader;
-import java.io.OutputStreamWriter;
-import java.net.HttpURLConnection;
-import java.net.MalformedURLException;
-import java.net.ProtocolException;
-import java.net.URL;
+import java.io.UnsupportedEncodingException;
 import java.util.ArrayList;
 import java.util.Date;
 import java.util.List;
+import java.util.concurrent.CountDownLatch;
 
-
+import org.apache.http.Header;
+import org.apache.http.HttpResponse;
+import org.apache.http.client.methods.HttpGet;
+import org.apache.http.client.methods.HttpPost;
+import org.apache.http.entity.StringEntity;
+import org.apache.http.impl.cookie.DateParseException;
+import org.apache.http.impl.cookie.DateUtils;
+import org.apache.http.params.HttpConnectionParams;
+import org.apache.http.params.HttpParams;
 import org.codehaus.jackson.JsonFactory;
 import org.codehaus.jackson.JsonParseException;
 import org.codehaus.jackson.JsonParser;
@@ -64,6 +68,7 @@ public class SyncAdapter extends AbstractThreadedSyncAdapter {
     public static final String EXTRAS_SYNC_IS_PERIODIC = "MantaSync.periodic";
 
     static final String HOSTNAME_PREF = "hostname";
+    static final String ACCOUNT_PREF = "account";
     static final String AUTH_TOKEN_PREF = "auth_token";
     static final String SYNC_AUTOMATICALLY_PREF = "sync_automatically";
     static final String SYNC_FREQUENCY_PREF = "sync_frequency";
@@ -74,11 +79,14 @@ public class SyncAdapter extends AbstractThreadedSyncAdapter {
 
     private static final String AUTH_TOKEN_HEADER = "Auth-Token";
     private static final String NUM_RESULTS_HEADER = "X-Num-Results";
+    private static final String ACCOUNT_NAME_HEADER = "X-Account-Name";
     
     private static final long DATE_WINDOW_OVERLAP_SECONDS = 60 * 60; // 1 hour
     
 	private final Context mContext;
 	private final ObjectMapper mObjectMapper;
+	
+	private AuthHttpRequest mAuthHttpRequest = null;
 	
 	private static long sLastCompletedSync = 0;
 
@@ -134,14 +142,14 @@ public class SyncAdapter extends AbstractThreadedSyncAdapter {
 	
     @Override
 	public void onPerformSync(Account account, Bundle extras, String authority,
-			ContentProviderClient provider, SyncResult syncResult) {
+			final ContentProviderClient provider, SyncResult syncResult) {
 		Log.e(TAG, "Sync request issued");
 		// One way or another, delay follow-up syncs for another 10 minutes.
 		syncResult.delayUntil = 600;
 		
 		boolean manual = extras.getBoolean(ContentResolver.SYNC_EXTRAS_MANUAL, false);
 		boolean ignoreSettings = extras.getBoolean(ContentResolver.SYNC_EXTRAS_IGNORE_SETTINGS, false);
-		boolean uploadOnly = extras.getBoolean(ContentResolver.SYNC_EXTRAS_UPLOAD, false);
+		final boolean uploadOnly = extras.getBoolean(ContentResolver.SYNC_EXTRAS_UPLOAD, false);
 		boolean isPeriodic = extras.getBoolean(EXTRAS_SYNC_IS_PERIODIC, false);
 		
         SharedPreferences settings = PreferenceManager.getDefaultSharedPreferences(mContext);
@@ -168,22 +176,68 @@ public class SyncAdapter extends AbstractThreadedSyncAdapter {
 		}
 		
 		Date now = new Date();
-		if (sLastCompletedSync > 0 && now.getTime() - sLastCompletedSync < 10000) {
+		if (sLastCompletedSync > 0 && now.getTime() - sLastCompletedSync < 5000) {
 			// If the last sync completed 10 seconds ago, ignore this request anyway.
-			Log.e(TAG, "Sync was CANCELLED because a sync completed within the past 10 seconds.");
+			Log.e(TAG, "Sync was CANCELLED because a sync completed within the past 5 seconds.");
 			return;
 		}
 		
+        final String url = settings.getString(HOSTNAME_PREF, getDefaultURL());
+
+        if (account == null) {
+        	Log.e(TAG, "ERROR: Account is null. Cannot continue with sync.");
+        	return;
+        }
+        
+        if (mAuthHttpRequest == null || mAuthHttpRequest.getAccount() != account || mAuthHttpRequest.getServerUrl() != url) {
+        	mAuthHttpRequest = new AuthHttpRequest(mContext, account, url);
+        }
+
+        // It is not possible to request auth tokens in the emulator.
+		if (!Build.FINGERPRINT.startsWith("generic")) {
+	    	final CountDownLatch latch = new CountDownLatch(1);
+	    	class MyPopulateAuthCallback extends AuthHttpRequest.PopulateAuthCallback {
+		    	public int mResult = AuthHttpRequest.RESULT_FAILURE;
+	    		public MyPopulateAuthCallback() {
+					mAuthHttpRequest.super();
+				}
+		    	@Override
+		    	public void onPopulateDone(int result) {
+		    		mResult = result;
+		    		latch.countDown();
+		    	}
+	    	};
+	    	MyPopulateAuthCallback callback = new MyPopulateAuthCallback();
+	    	mAuthHttpRequest.PopulateHttpClientWithAuthToken(callback);
+	    	
+	    	try {
+				latch.await();
+			} catch (InterruptedException e) {
+				// TODO Auto-generated catch block
+				e.printStackTrace();
+			}
+			if (callback.mResult == AuthHttpRequest.RESULT_RETRY) {
+				// Exit, because this means that we were interrupted by an intent which 
+				// asked the user for their auth. We must restart the process after that concludes.
+				Log.e(TAG, "PopulateAuthCallback() returned false. Exiting sync, in order to "+
+						"allow sync to start again.");
+				return;
+			}
+		}
+		
+		onStartSync(provider, url, uploadOnly, account.name);
+    }
+        
+	private void onStartSync(ContentProviderClient provider, String url, boolean uploadOnly, String accountName) {
+
 		//Debug.startMethodTracing("mantasync-" + now.getTime());
 		
 		StoreProvider localProvider = (StoreProvider)provider.getLocalContentProvider();
-
-        String url = settings.getString(HOSTNAME_PREF, getDefaultURL());
-
+		
         // TODO Is there a way to not sync everything, and instead only sync the client view? 
         // Perhaps using the extras Bundle.
         Cursor c = localProvider.query(Meta_Table.CONTENT_URI, null, null, null, null);
-
+        
         // First, clear the sync status for everything.
         c.moveToFirst();
         while (!c.isAfterLast()) {
@@ -201,7 +255,7 @@ public class SyncAdapter extends AbstractThreadedSyncAdapter {
         while (!c.isAfterLast()) {
         	Log.e(TAG, "Syncing kind: " + c.getString(c.getColumnIndex(Meta_Table.PATH_QUERY)));
         	syncOneKind(localProvider, url, c.getString(c.getColumnIndex(Meta_Table.PATH_QUERY)),
-        			c.getLong(c.getColumnIndex(Meta_Table.LAST_SYNCED)), uploadOnly);
+        			c.getLong(c.getColumnIndex(Meta_Table.LAST_SYNCED)), uploadOnly, accountName);
         	c.moveToNext();
         }
         c.close();
@@ -210,8 +264,11 @@ public class SyncAdapter extends AbstractThreadedSyncAdapter {
 
 		//Debug.stopMethodTracing();
 	}
+	
 	public void syncOneKind(StoreProvider localProvider, String url, String pathQuery, long lastSynced,
-			boolean uploadOnly) {
+			boolean uploadOnly, String accountName) {
+		int lastResponseCode = 0;
+		String lastResponseMessage = "";
 		SharedPreferences settings = PreferenceManager.getDefaultSharedPreferences(mContext);
 		
 		Uri tableUri = Uri.parse(Meta_Table.CONTENT_URI.toString() + pathQuery);
@@ -266,11 +323,9 @@ public class SyncAdapter extends AbstractThreadedSyncAdapter {
 		values.put(Meta_Table.PROGRESS_PERCENT, -1);
 		values.put(Meta_Table.STATUS, "Finding Changes");
         localProvider.update(tableUri, values, null, null);
-		
+        
         UploadData upload = localProvider.startUploadTransactionForKind(app, kind, dataUri);
         boolean error = upload.error;
-        int errorResponseCode = -1;
-        String errorMessage = "";
         Log.e(TAG, "For Kind " + kind + ":\n" + upload.data);
         if (!error && upload.count > 0) {
             // Actually upload the changes to the remote server
@@ -282,70 +337,65 @@ public class SyncAdapter extends AbstractThreadedSyncAdapter {
             localProvider.update(tableUri, values, null, null);
         	
     		Log.e(TAG, "Contacting hostname: " + destUrl);
-    		URL uploadUrl = null;
     		String uploadResult = "";
     		
-    		try {
-    			uploadUrl = new URL(destUrl.toString());
-    		} catch (MalformedURLException e) {
-    			// TODO Auto-generated catch block
-    			e.printStackTrace();
-    			error = true;
-    		}
-    		HttpURLConnection conn = null;
-    		try {
-    			conn = (HttpURLConnection)uploadUrl.openConnection();
-    		} catch (IOException e) {
-    			// TODO Auto-generated catch block
-    			e.printStackTrace();
-    			error = true;
-    		}
-    		try {
-				conn.setRequestMethod("POST");
-			} catch (ProtocolException e1) {
+    		HttpPost http_post = new HttpPost(destUrl.toString());
+	        HttpParams params = http_post.getParams();
+	        HttpConnectionParams.setConnectionTimeout(params, 5000);
+	        http_post.addHeader(AUTH_TOKEN_HEADER, settings.getString(AUTH_TOKEN_PREF, DEFAULT_AUTH_TOKEN));
+	        http_post.addHeader(ACCOUNT_NAME_HEADER, accountName);
+	        HttpResponse response = null;
+	        InputStream inputStream = null;
+	        
+	        try {
+				http_post.setEntity(new StringEntity(upload.data));
+			} catch (UnsupportedEncodingException e1) {
 				// TODO Auto-generated catch block
 				e1.printStackTrace();
-    			error = true;
+				error = true;
 			}
-    		conn.setConnectTimeout(5000);
-    		conn.addRequestProperty(AUTH_TOKEN_HEADER, settings.getString(AUTH_TOKEN_PREF, DEFAULT_AUTH_TOKEN));
-    		//conn.addRequestProperty("Cookie",G.getAuthCookie().getName() + "=" + G.getAuthCookie().getValue());
-    		
-    		conn.setDoOutput(true);
-    		BufferedWriter wr;
-			try {
-				wr = new BufferedWriter(new OutputStreamWriter(conn.getOutputStream()), 8192);
-	    		if (wr != null) {
-	    			wr.write(upload.data);
-	    		}
-	    		wr.close();
-			} catch (IOException e1) {
+	        
+	        try {
+				response = mAuthHttpRequest.getHttpClient().execute(http_post);
+				inputStream = response.getEntity().getContent();
+			} catch (IOException e) {
 				// TODO Auto-generated catch block
-				e1.printStackTrace();
-    			error = true;
+				e.printStackTrace();
+				error = true;
 			}
-    		
-    		StringBuffer sb = new StringBuffer();
+			
+			StringBuffer sb = new StringBuffer();
     		String line;
 
-    		BufferedReader rd = null;
-    		try {
-    			rd = new BufferedReader(new InputStreamReader(conn.getInputStream()), 8192);
-    			if (rd != null) {
-    				while ((line = rd.readLine()) != null)
-    				{
-    					sb.append(line);
-    				}
-
-    				rd.close();
-    			}
-    		} catch (IOException e) {
-    			// TODO Auto-generated catch block
-    			e.printStackTrace();
+    		if (inputStream != null) {
+	    		BufferedReader rd = null;
+	    		try {
+	    			rd = new BufferedReader(new InputStreamReader(inputStream), 8192);
+	    			if (rd != null) {
+	    				while ((line = rd.readLine()) != null)
+	    				{
+	    					sb.append(line);
+	    				}
+	
+	    				rd.close();
+	    			}
+	    		} catch (IOException e) {
+	    			// TODO Auto-generated catch block
+	    			e.printStackTrace();
+	    			error = true;
+	    		}
+    		} else {
     			error = true;
     		}
-    		uploadResult = sb.toString();
-
+    		
+			if (response != null) {
+				lastResponseCode = response.getStatusLine().getStatusCode();
+				lastResponseMessage = response.getStatusLine().getReasonPhrase();
+			}
+			
+			if (lastResponseCode != 200) {
+				error = true;
+			}
             Log.e(TAG, "Got uploadResult: " + uploadResult + ", upload.count=" + upload.count);
             
         	values.clear();
@@ -353,16 +403,6 @@ public class SyncAdapter extends AbstractThreadedSyncAdapter {
     		values.put(Meta_Table.PROGRESS_PERCENT, -1);
     		values.put(Meta_Table.STATUS, "Clearing Changes");
             localProvider.update(tableUri, values, null, null);
-            
-            if (error) {
-            	try {
-					errorResponseCode = conn.getResponseCode();
-	            	errorMessage = conn.getResponseMessage();
-				} catch (IOException e) {
-					// TODO Auto-generated catch block
-					e.printStackTrace();
-				}
-            }
         }
         
         localProvider.finishUploadTransactionForKind(app, kind, dataUri, upload, error);
@@ -379,7 +419,7 @@ public class SyncAdapter extends AbstractThreadedSyncAdapter {
 		if (error) {
 			String message = "Error";
 			String httpStatus = "";
-			httpStatus = String.format("%d %s", errorResponseCode, errorMessage);
+			httpStatus = String.format("%d %s", lastResponseCode, lastResponseMessage);
 			if (httpStatus.length() > 0) {
 				message += ": " + httpStatus;
 			}
@@ -395,13 +435,15 @@ public class SyncAdapter extends AbstractThreadedSyncAdapter {
         // ------------------- Download -------------------
         if (!uploadOnly) {
 
+        	lastResponseCode = 0;
+        	lastResponseMessage = "";
+        	
         	values.put(Meta_Table.SYNC_ACTIVE, true);
     		values.put(Meta_Table.PROGRESS_PERCENT, -1);
     		values.put(Meta_Table.STATUS, "Downloading");
             localProvider.insert(tableUri, null);
             localProvider.update(tableUri, values, null, null);
         	
-			URL downloadUrl = null;
 	        boolean downloadSuccess = false;
 			long downloadNow = 0;
 			
@@ -410,39 +452,44 @@ public class SyncAdapter extends AbstractThreadedSyncAdapter {
 				destUrl = destUrl.buildUpon().appendQueryParameter("date_start", start_date).build();
 			}
 			Log.e(TAG, "Contacting hostname: " + destUrl);
-	
-			try {
-				downloadUrl = new URL(destUrl.toString());
-			} catch (MalformedURLException e) {
-				// TODO Auto-generated catch block
-				e.printStackTrace();
-			}
-			HttpURLConnection conn = null;
-			try {
-				conn = (HttpURLConnection)downloadUrl.openConnection();
+
+	        HttpGet http_get = new HttpGet(destUrl.toString());
+	        HttpParams params = http_get.getParams();
+	        HttpConnectionParams.setConnectionTimeout(params, 5000);
+	        http_get.addHeader(AUTH_TOKEN_HEADER, settings.getString(AUTH_TOKEN_PREF, DEFAULT_AUTH_TOKEN));
+	        http_get.addHeader(ACCOUNT_NAME_HEADER, accountName);
+	        HttpResponse response = null;
+	        InputStream inputStream = null;
+	        try {
+				response = mAuthHttpRequest.getHttpClient().execute(http_get);
+				inputStream = response.getEntity().getContent();
 			} catch (IOException e) {
 				// TODO Auto-generated catch block
 				e.printStackTrace();
 			}
-			conn.setConnectTimeout(5000);
-			conn.addRequestProperty(AUTH_TOKEN_HEADER, settings.getString(AUTH_TOKEN_PREF, DEFAULT_AUTH_TOKEN));
-			//conn.addRequestProperty("Cookie",G.getAuthCookie().getName() + "=" + G.getAuthCookie().getValue());
 			
-			InputStream inputStream = null;
-			try {
-				inputStream = conn.getInputStream();
-			} catch (IOException e) {
-				// TODO Auto-generated catch block
-				e.printStackTrace();
-			}
 			int count = -1;
-			String countString = conn.getHeaderField(NUM_RESULTS_HEADER);
-			if (countString != null) {
-				count = Integer.valueOf(countString);
+			long connDate = -1;
+			if (response != null) {
+				Header countString = response.getFirstHeader(NUM_RESULTS_HEADER);
+				if (countString != null) {
+					count = Integer.valueOf(countString.getValue());
+				}
+				try {
+					Header dateString = response.getFirstHeader("Date");
+					if (dateString != null) {
+						connDate = DateUtils.parseDate(dateString.getValue()).getTime();
+					}
+				} catch (DateParseException e) {
+					// TODO Auto-generated catch block
+					e.printStackTrace();
+				}
+				lastResponseCode = response.getStatusLine().getStatusCode();
+				lastResponseMessage = response.getStatusLine().getReasonPhrase();
 			}
 			
-			if (inputStream != null) {
-				downloadNow = conn.getDate() / 1000;
+			if (inputStream != null && lastResponseCode == 200) {
+				downloadNow = connDate / 1000;
 						
 				values.clear();
 				values.put(Meta_Table.STATUS, "Parsing");
@@ -460,26 +507,7 @@ public class SyncAdapter extends AbstractThreadedSyncAdapter {
 					e.printStackTrace();
 				}
 		        
-				if (jp != null) {
-//					try {
-//					if (jp1.nextToken() != JsonToken.START_ARRAY) {
-//						throw new JsonParseException("Did not start with array", jp1.getCurrentLocation());
-//					} 
-//					while (jp1.nextToken() != JsonToken.END_ARRAY) {
-//						if (jp1.getCurrentToken() != JsonToken.START_OBJECT) {
-//							throw new JsonParseException("Array contains non-object", jp1.getCurrentLocation());
-//						}
-//						jp1.skipChildren();
-//						count++;
-//					}
-//					jp1.close();
-//					jp1 = null;
-//					} catch (JsonParseException e) {
-//						e.printStackTrace();
-//					} catch (IOException e) {
-//						e.printStackTrace();
-//					}
-					
+				if (jp != null) {					
 					if (count == -1 || count > 0) {
 						localProvider.updateAllFromJson(app, kind, dataUri, jp, count, tableUri);
 					}
@@ -503,11 +531,8 @@ public class SyncAdapter extends AbstractThreadedSyncAdapter {
 			} else {
 				String message = "Error";
 				String httpStatus = "";
-				try {
-					httpStatus = String.format("%d %s", conn.getResponseCode(), conn.getResponseMessage());
-				} catch (IOException e) {
-					e.printStackTrace();
-				}
+				httpStatus = String.format("%d %s", lastResponseCode, lastResponseMessage);
+
 				if (httpStatus.length() > 0) {
 					message += ": " + httpStatus;
 				}

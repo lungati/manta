@@ -23,6 +23,12 @@
                 android:defaultValue=""
                 android:title="Sync Hostname"
                 android:key="hostname" />
+        <ListPreference
+                android:name="Account"
+                android:summary="Account to use with the synchronization server."
+                android:defaultValue=""
+                android:title="Account"
+                android:key="account" />
         <EditTextPreference
                 android:name="Security Token"
                 android:summary="Security token (password) to use with the synchronization server."
