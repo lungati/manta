@@ -120,6 +120,7 @@ public class AuthHttpRequest {
 				Intent intent = (Intent)bundle.get(AccountManager.KEY_INTENT);
 				if(intent != null) {
 					// User input required
+					intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
 					mContext.startActivity(intent);
 					if (mCallback != null) {
 						mCallback.onPopulateDone(RESULT_RETRY);
